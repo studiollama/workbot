@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(qmd *)",
+      "Bash(cd *workbot-brain*)",
+      "Bash(ls *workbot-brain*)",
+      "Bash(ls *context*)",
+      "Bash(ls *knowledge*)",
+      "Bash(ls *inbox*)",
+      "Bash(ls *archive*)",
+      "Bash(mkdir *workbot-brain*)",
+      "Bash(mv *workbot-brain*)",
+      "Bash(rm *workbot-brain/inbox*)",
+      "Bash(find *workbot-brain*)",
+      "Bash(cat *workbot-brain*)",
+      "Bash(wc *workbot-brain*)",
+      "Bash(cat *.workbot/services.json*)",
+      "Bash(cat *.workbot/codex-auth.json*)",
+      "Bash(node *)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(qmd update:*)",
+      "Bash(qmd embed:*)"
+    ]
+  }
+}

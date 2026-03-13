@@ -1,0 +1,8 @@
+{
+  "newFileLocation": "folder",
+  "newFileFolderPath": "inbox",
+  "attachmentFolderPath": "archive/attachments",
+  "alwaysUpdateLinks": true,
+  "showUnsupportedFiles": false,
+  "defaultViewMode": "source"
+}

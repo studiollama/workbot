@@ -1,0 +1,626 @@
+import { Router } from "express";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+
+const router = Router();
+
+// Project root storage for service tokens (gitignored via .workbot/)
+// resolve from server/ up to project root
+const PROJECT_ROOT = join(process.cwd(), "..");
+const STORE_DIR = join(PROJECT_ROOT, ".workbot");
+const STORE_PATH = join(STORE_DIR, "services.json");
+
+interface StoredService {
+  token: string;
+  user: string;
+  extras?: Record<string, string>;
+}
+
+function loadStore(): Record<string, StoredService> {
+  try {
+    if (!existsSync(STORE_PATH)) return {};
+    return JSON.parse(readFileSync(STORE_PATH, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveStore(data: Record<string, StoredService>) {
+  if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
+  writeFileSync(STORE_PATH, JSON.stringify(data, null, 2));
+}
+
+interface ServiceConfig {
+  name: string;
+  validateUrl: string | ((extras: Record<string, string>) => string);
+  authHeader: (token: string, extras?: Record<string, string>) => Record<string, string>;
+  extractUser: (data: any) => string;
+  tokenUrl: string;
+  tokenPrefix: string;
+  extraFields?: { key: string; label: string; placeholder: string }[];
+  tokenLabel?: string; // e.g., "Client Secret" for Azure services
+  authNote?: string; // e.g., "Token expires after 1 hour"
+  difficulty?: string; // e.g., "API Key", "OAuth Token", "Enterprise App"
+  preConnect?: (
+    token: string,
+    extras: Record<string, string>
+  ) => Promise<{ resolvedToken: string }>;
+}
+
+// Azure AD client credentials → bearer token exchange
+async function getAzureADToken(
+  tenantId: string,
+  clientId: string,
+  clientSecret: string,
+  scope = "https://graph.microsoft.com/.default"
+): Promise<string> {
+  const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope,
+  });
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Azure AD token exchange failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data.access_token;
+}
+
+// Dashboard layout persistence
+const DASHBOARD_PATH = join(STORE_DIR, "dashboard.json");
+
+function loadDashboardConfig(): { enabledServices: string[] } | null {
+  try {
+    if (!existsSync(DASHBOARD_PATH)) return null;
+    return JSON.parse(readFileSync(DASHBOARD_PATH, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function saveDashboardConfig(config: { enabledServices: string[] }) {
+  if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
+  writeFileSync(DASHBOARD_PATH, JSON.stringify(config, null, 2));
+}
+
+const SERVICES: Record<string, ServiceConfig> = {
+  github: {
+    name: "GitHub",
+    validateUrl: "https://api.github.com/user",
+    authHeader: (token) => ({
+      Authorization: `Bearer ${token}`,
+      "User-Agent": "workbot",
+    }),
+    extractUser: (data) => data.login,
+    tokenUrl: "https://github.com/settings/tokens",
+    tokenPrefix: "ghp_",
+    difficulty: "API Key",
+  },
+  airtable: {
+    name: "Airtable",
+    validateUrl: "https://api.airtable.com/v0/meta/whoami",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => data.email ?? data.id,
+    tokenUrl: "https://airtable.com/create/tokens",
+    tokenPrefix: "pat",
+    difficulty: "API Key",
+  },
+  asana: {
+    name: "Asana",
+    validateUrl: "https://app.asana.com/api/1.0/users/me",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => data.data?.name ?? data.data?.email ?? "Connected",
+    tokenUrl: "https://app.asana.com/0/developer-console",
+    tokenPrefix: "",
+    difficulty: "API Key",
+  },
+  zendesk: {
+    name: "Zendesk",
+    validateUrl: (extras) =>
+      `https://${extras.subdomain}.zendesk.com/api/v2/users/me.json`,
+    authHeader: (token, extras) => ({
+      Authorization:
+        "Basic " +
+        Buffer.from(`${extras?.email}/token:${token}`).toString("base64"),
+    }),
+    extractUser: (data) => data.user?.name ?? data.user?.email ?? "Connected",
+    tokenUrl: "https://support.zendesk.com/hc/en-us/articles/4408889192858",
+    tokenPrefix: "",
+    extraFields: [
+      {
+        key: "subdomain",
+        label: "Zendesk Subdomain",
+        placeholder: "yourcompany",
+      },
+      {
+        key: "email",
+        label: "Agent Email",
+        placeholder: "you@company.com",
+      },
+    ],
+    difficulty: "API Key + Config",
+  },
+  squarespace: {
+    name: "Squarespace",
+    validateUrl: "https://api.squarespace.com/1.0/authorization/website",
+    authHeader: (token) => ({
+      Authorization: `Bearer ${token}`,
+      "User-Agent": "workbot",
+    }),
+    extractUser: (data) => data.website?.siteTitle ?? data.id ?? "Connected",
+    tokenUrl: "https://developers.squarespace.com/",
+    tokenPrefix: "",
+    difficulty: "OAuth Token",
+  },
+  freshdesk: {
+    name: "Freshdesk",
+    validateUrl: (extras) =>
+      `https://${extras.subdomain}.freshdesk.com/api/v2/agents/me`,
+    authHeader: (token) => ({
+      Authorization:
+        "Basic " + Buffer.from(`${token}:X`).toString("base64"),
+    }),
+    extractUser: (data) =>
+      data.contact?.name ?? data.contact?.email ?? "Connected",
+    tokenUrl: "https://support.freshdesk.com/en/support/solutions/articles/215517",
+    tokenPrefix: "",
+    extraFields: [
+      {
+        key: "subdomain",
+        label: "Freshdesk Subdomain",
+        placeholder: "yourcompany",
+      },
+    ],
+    difficulty: "API Key + Config",
+  },
+  quickbooks: {
+    name: "QuickBooks",
+    validateUrl: (extras) =>
+      `https://quickbooks.api.intuit.com/v3/company/${extras.realmId}/companyinfo/${extras.realmId}`,
+    authHeader: (token) => ({
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    }),
+    extractUser: (data) =>
+      data.CompanyInfo?.CompanyName ?? "Connected",
+    tokenUrl: "https://developer.intuit.com/app/developer/playground",
+    tokenPrefix: "",
+    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
+    difficulty: "OAuth Token",
+    extraFields: [
+      {
+        key: "realmId",
+        label: "Company ID (Realm ID)",
+        placeholder: "123456789",
+      },
+    ],
+  },
+  googleads: {
+    name: "Google Ads",
+    validateUrl:
+      "https://googleads.googleapis.com/v17/customers:listAccessibleCustomers",
+    authHeader: (token, extras) => ({
+      Authorization: `Bearer ${token}`,
+      "developer-token": extras?.developerToken ?? "",
+    }),
+    extractUser: (data) => {
+      const customers = data.resourceNames ?? [];
+      return customers.length > 0
+        ? `${customers.length} account(s)`
+        : "Connected";
+    },
+    tokenUrl: "https://developers.google.com/google-ads/api/docs/get-started/oauth-cloud-project",
+    tokenPrefix: "",
+    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
+    difficulty: "OAuth Token",
+    extraFields: [
+      {
+        key: "developerToken",
+        label: "Developer Token",
+        placeholder: "xxxxxxxxxxxxxxx",
+      },
+    ],
+  },
+  entra: {
+    name: "Entra (Azure AD)",
+    validateUrl: "https://graph.microsoft.com/v1.0/organization",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => {
+      const org = data.value?.[0];
+      return org?.displayName ?? org?.id ?? "Connected";
+    },
+    tokenUrl: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
+    tokenPrefix: "",
+    tokenLabel: "Client Secret",
+    difficulty: "Enterprise App",
+    extraFields: [
+      { key: "tenant_id", label: "Tenant ID", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+      { key: "client_id", label: "Client ID (App ID)", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+    ],
+    preConnect: async (clientSecret, extras) => {
+      const resolvedToken = await getAzureADToken(
+        extras.tenant_id,
+        extras.client_id,
+        clientSecret
+      );
+      return { resolvedToken };
+    },
+  },
+  intune: {
+    name: "Intune",
+    validateUrl:
+      "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=1",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) =>
+      data.value
+        ? `${data["@odata.count"] ?? data.value.length} device(s)`
+        : "Connected",
+    tokenUrl: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
+    tokenPrefix: "",
+    tokenLabel: "Client Secret",
+    difficulty: "Enterprise App",
+    extraFields: [
+      { key: "tenant_id", label: "Tenant ID", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+      { key: "client_id", label: "Client ID (App ID)", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+    ],
+    preConnect: async (clientSecret, extras) => {
+      const resolvedToken = await getAzureADToken(
+        extras.tenant_id,
+        extras.client_id,
+        clientSecret
+      );
+      return { resolvedToken };
+    },
+  },
+  security: {
+    name: "Security Center / XDR",
+    validateUrl:
+      "https://graph.microsoft.com/v1.0/security/alerts_v2?$top=1",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) =>
+      data.value
+        ? `${data["@odata.count"] ?? data.value.length} alert(s)`
+        : "Connected",
+    tokenUrl: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
+    tokenPrefix: "",
+    tokenLabel: "Client Secret",
+    difficulty: "Enterprise App",
+    extraFields: [
+      { key: "tenant_id", label: "Tenant ID", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+      { key: "client_id", label: "Client ID (App ID)", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+    ],
+    preConnect: async (clientSecret, extras) => {
+      const resolvedToken = await getAzureADToken(
+        extras.tenant_id,
+        extras.client_id,
+        clientSecret
+      );
+      return { resolvedToken };
+    },
+  },
+  canva: {
+    name: "Canva",
+    validateUrl: "https://api.canva.com/rest/v1/users/me",
+    authHeader: (token) => ({
+      Authorization: `Bearer ${token}`,
+    }),
+    extractUser: (data) =>
+      data.display_name ?? data.email ?? "Connected",
+    tokenUrl: "https://www.canva.dev/docs/connect/authentication/",
+    tokenPrefix: "",
+    authNote: "OAuth token — expires after ~4 hours. Re-connect when expired.",
+    difficulty: "OAuth Token",
+  },
+  nanobanana: {
+    name: "Nano Banana (Gemini)",
+    validateUrl: "https://generativelanguage.googleapis.com/v1beta/models",
+    authHeader: (token) => ({
+      "x-goog-api-key": token,
+    }),
+    extractUser: (data) => {
+      const models = data.models ?? [];
+      return models.length > 0
+        ? `${models.length} model(s) available`
+        : "Connected";
+    },
+    tokenUrl: "https://aistudio.google.com/apikey",
+    tokenPrefix: "AIza",
+    difficulty: "API Key",
+  },
+  jules: {
+    name: "Jules",
+    validateUrl: "https://jules.googleapis.com/v1alpha/sessions",
+    authHeader: (token) => ({
+      "X-Goog-Api-Key": token,
+    }),
+    extractUser: (data) => {
+      const sessions = data.sessions ?? [];
+      return sessions.length > 0
+        ? `${sessions.length} session(s)`
+        : "Connected";
+    },
+    tokenUrl: "https://developers.google.com/jules/api",
+    tokenPrefix: "",
+    difficulty: "API Key",
+  },
+  sharepoint: {
+    name: "SharePoint",
+    validateUrl: (extras) =>
+      `https://${extras.site_host}/_api/web`,
+    authHeader: (token) => ({
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json;odata=verbose",
+    }),
+    extractUser: (data) =>
+      data.d?.Title ?? data.Title ?? "Connected",
+    tokenUrl: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
+    tokenPrefix: "",
+    tokenLabel: "Client Secret",
+    difficulty: "Enterprise App",
+    extraFields: [
+      { key: "site_host", label: "SharePoint Host", placeholder: "yourcompany.sharepoint.com" },
+      { key: "tenant_id", label: "Tenant ID", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+      { key: "client_id", label: "Client ID (App ID)", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+    ],
+    preConnect: async (clientSecret, extras) => {
+      const resolvedToken = await getAzureADToken(
+        extras.tenant_id,
+        extras.client_id,
+        clientSecret,
+        `https://${extras.site_host}/.default`
+      );
+      return { resolvedToken };
+    },
+  },
+  outlook: {
+    name: "Outlook (Microsoft 365)",
+    validateUrl: "https://graph.microsoft.com/v1.0/users?$top=1&$select=displayName,mail",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => {
+      const user = data.value?.[0];
+      return user?.displayName ?? user?.mail ?? "Connected";
+    },
+    tokenUrl: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
+    tokenPrefix: "",
+    tokenLabel: "Client Secret",
+    difficulty: "Enterprise App",
+    extraFields: [
+      { key: "tenant_id", label: "Tenant ID", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+      { key: "client_id", label: "Client ID (App ID)", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+    ],
+    preConnect: async (clientSecret, extras) => {
+      const resolvedToken = await getAzureADToken(
+        extras.tenant_id,
+        extras.client_id,
+        clientSecret
+      );
+      return { resolvedToken };
+    },
+  },
+  gmail: {
+    name: "Gmail",
+    validateUrl: "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => data.emailAddress ?? "Connected",
+    tokenUrl: "https://developers.google.com/oauthplayground/",
+    tokenPrefix: "",
+    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
+    difficulty: "OAuth Token",
+  },
+  googleadmin: {
+    name: "Google Admin Console",
+    validateUrl:
+      "https://admin.googleapis.com/admin/directory/v1/users?maxResults=1&customer=my_customer",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => {
+      const users = data.users ?? [];
+      return users.length > 0
+        ? `${users[0].name?.fullName ?? users[0].primaryEmail ?? "Admin"}`
+        : "Connected";
+    },
+    tokenUrl: "https://developers.google.com/oauthplayground/",
+    tokenPrefix: "",
+    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
+    difficulty: "Admin + OAuth",
+  },
+  ticktick: {
+    name: "TickTick",
+    validateUrl: "https://api.ticktick.com/open/v1/user",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => data.username ?? data.name ?? "Connected",
+    tokenUrl: "https://developer.ticktick.com/",
+    tokenPrefix: "",
+    authNote: "OAuth token — may expire. Re-connect when expired.",
+    difficulty: "OAuth Token",
+  },
+  readai: {
+    name: "Read.ai",
+    validateUrl: "https://api.read.ai/v1/meetings",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => {
+      const meetings = data.meetings ?? data.data ?? [];
+      return Array.isArray(meetings)
+        ? `${meetings.length} meeting(s)`
+        : "Connected";
+    },
+    tokenUrl: "https://support.read.ai/hc/en-us/articles/49380809380371-API-Keys-Authentication",
+    tokenPrefix: "sk_",
+    authNote: "OAuth token — expires after 10 minutes. Re-connect when expired.",
+    difficulty: "OAuth Token",
+  },
+};
+
+// GET /api/services/status
+router.get("/status", (_req, res) => {
+  const store = loadStore();
+  const result: Record<string, { connected: boolean; user?: string }> = {};
+
+  for (const key of Object.keys(SERVICES)) {
+    const saved = store[key];
+    result[key] = saved
+      ? { connected: true, user: saved.user }
+      : { connected: false };
+  }
+
+  // Codex (ChatGPT) — check for auth file (optional service)
+  const codexAuthPath = join(STORE_DIR, "codex-auth.json");
+  let codexConnected = false;
+  try {
+    if (existsSync(codexAuthPath)) {
+      const data = JSON.parse(readFileSync(codexAuthPath, "utf-8"));
+      codexConnected = !!data.tokens || !!data.OPENAI_API_KEY || !!data.access_token;
+    }
+  } catch {}
+  result.codex = { connected: codexConnected };
+
+  res.json(result);
+});
+
+// POST /api/services/:service/connect
+router.post("/:service/connect", async (req, res) => {
+  const { service } = req.params;
+  const { token, ...extras } = req.body;
+
+  const config = SERVICES[service];
+  if (!config) {
+    return res.status(400).json({ error: `Unknown service: ${service}` });
+  }
+
+  if (!token || typeof token !== "string") {
+    return res.status(400).json({ error: "Token is required" });
+  }
+
+  // Validate required extra fields
+  if (config.extraFields) {
+    for (const field of config.extraFields) {
+      if (!extras[field.key] || typeof extras[field.key] !== "string") {
+        return res.status(400).json({ error: `${field.label} is required` });
+      }
+    }
+  }
+
+  try {
+    // If service has a preConnect hook (e.g., Azure AD token exchange),
+    // resolve the actual bearer token from the user's credentials
+    let validationToken = token;
+    if (config.preConnect) {
+      const result = await config.preConnect(token, extras);
+      validationToken = result.resolvedToken;
+    }
+
+    const validateUrl =
+      typeof config.validateUrl === "function"
+        ? config.validateUrl(extras)
+        : config.validateUrl;
+
+    const response = await fetch(validateUrl, {
+      headers: config.authHeader(validationToken, extras),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(401).json({
+        error:
+          response.status === 401 || response.status === 403
+            ? "Invalid token"
+            : `Validation failed (${response.status}): ${text.slice(0, 100)}`,
+      });
+    }
+
+    const data = await response.json();
+    const user = config.extractUser(data);
+
+    // Persist to disk (include extras so we can rebuild auth headers later)
+    const store = loadStore();
+    const savedExtras: Record<string, string> = {};
+    if (config.extraFields) {
+      for (const field of config.extraFields) {
+        savedExtras[field.key] = extras[field.key];
+      }
+    }
+    store[service] = {
+      token,
+      user,
+      ...(Object.keys(savedExtras).length > 0 ? { extras: savedExtras } : {}),
+    };
+    saveStore(store);
+
+    res.json({ connected: true, user });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? "Connection failed" });
+  }
+});
+
+// POST /api/services/:service/disconnect
+router.post("/:service/disconnect", (req, res) => {
+  const store = loadStore();
+  delete store[req.params.service];
+  saveStore(store);
+  res.json({ disconnected: true });
+});
+
+// GET /api/services/config — returns token URLs and display info (no secrets)
+router.get("/config", (_req, res) => {
+  const config: Record<
+    string,
+    {
+      name: string;
+      tokenUrl: string;
+      tokenPrefix: string;
+      extraFields?: { key: string; label: string; placeholder: string }[];
+      tokenLabel?: string;
+      authNote?: string;
+      difficulty?: string;
+    }
+  > = {};
+  for (const [key, svc] of Object.entries(SERVICES)) {
+    config[key] = {
+      name: svc.name,
+      tokenUrl: svc.tokenUrl,
+      tokenPrefix: svc.tokenPrefix,
+      ...(svc.extraFields ? { extraFields: svc.extraFields } : {}),
+      ...(svc.tokenLabel ? { tokenLabel: svc.tokenLabel } : {}),
+      ...(svc.authNote ? { authNote: svc.authNote } : {}),
+      ...(svc.difficulty ? { difficulty: svc.difficulty } : {}),
+    };
+  }
+  config.codex = {
+    name: "Codex (ChatGPT)",
+    tokenUrl: "",
+    tokenPrefix: "",
+    difficulty: "Device Login",
+  };
+  res.json(config);
+});
+
+// GET /api/services/dashboard — returns enabled services + order
+router.get("/dashboard", (_req, res) => {
+  const saved = loadDashboardConfig();
+  if (saved) {
+    res.json(saved);
+  } else {
+    // Default: all services enabled in definition order
+    const allKeys = [...Object.keys(SERVICES), "codex"];
+    res.json({ enabledServices: allKeys });
+  }
+});
+
+// PUT /api/services/dashboard — saves enabled services list (ordered)
+router.put("/dashboard", (req, res) => {
+  const { enabledServices } = req.body;
+  if (!Array.isArray(enabledServices)) {
+    return res.status(400).json({ error: "enabledServices must be an array" });
+  }
+  saveDashboardConfig({ enabledServices });
+  res.json({ ok: true });
+});
+
+export default router;

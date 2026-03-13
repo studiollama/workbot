@@ -1,0 +1,44 @@
+# ============================================
+# WORKBOT BRAIN - GITIGNORE
+# ============================================
+# Framework files (_system, _templates, _frameworks) ARE committed.
+# Content files (your actual knowledge) are NOT committed.
+# This keeps the brain reusable across clones.
+# ============================================
+
+# --- CONTENT DIRECTORIES (business-specific, never committed) ---
+# Ignore all content but keep directory structure via .gitkeep
+context/*
+!context/.gitkeep
+knowledge/**
+!knowledge/
+!knowledge/*/
+!knowledge/**/.gitkeep
+inbox/*
+!inbox/.gitkeep
+archive/**
+!archive/
+!archive/*/
+!archive/**/.gitkeep
+
+# --- OBSIDIAN WORKSPACE STATE (device-specific) ---
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/plugins/
+.obsidian/themes/
+
+# --- QMD SEARCH INDEX (derived data, rebuild with `qmd update && qmd embed`) ---
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# --- DEFAULT OBSIDIAN FILE ---
+Welcome.md
+
+# --- OS / EDITOR JUNK ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
