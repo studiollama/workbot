@@ -25,6 +25,7 @@ const SERVICE_ICONS: Record<string, string> = {
   googleadmin: "GC",
   ticktick: "TT",
   readai: "RA",
+  dagster: "DG",
 };
 
 export default function Dashboard() {

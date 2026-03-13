@@ -38,6 +38,7 @@ Vite proxies `/api` → Express. Preview launch.json uses `node node_modules/vit
 | Google Admin Console | Bearer (OAuth, expires ~1hr) | [Google OAuth Playground](https://developers.google.com/oauthplayground/) | `admin.googleapis.com/admin/directory/v1/users` |
 | TickTick | Bearer (OAuth) | [TickTick Developer](https://developer.ticktick.com/) | `api.ticktick.com/open/v1/user` |
 | Read.ai | Bearer (OAuth, expires ~10min) | [Read.ai API Keys](https://support.read.ai/hc/en-us/articles/49380809380371) | `api.read.ai/v1/meetings` |
+| Dagster Cloud | User Token + Org Name | [Dagster Tokens Docs](https://docs.dagster.io/deployment/dagster-plus/management/tokens) | `{org}.dagster.cloud/prod/report_asset_materialization/` |
 | Codex (ChatGPT) | Device-code OAuth | Via dashboard UI flow | Optional — ChatGPT subscription auth |
 
 ## How Tokens Work

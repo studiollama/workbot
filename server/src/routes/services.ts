@@ -456,6 +456,28 @@ const SERVICES: Record<string, ServiceConfig> = {
     authNote: "OAuth token — expires after 10 minutes. Re-connect when expired.",
     difficulty: "OAuth Token",
   },
+
+  dagster: {
+    name: "Dagster Cloud",
+    validateUrl: (extras) =>
+      `https://${extras.org_name}.dagster.cloud/prod/report_asset_materialization/`,
+    authHeader: (token) => ({
+      "Dagster-Cloud-Api-Token": token,
+    }),
+    extractUser: () => "Connected",
+    tokenUrl:
+      "https://docs.dagster.io/deployment/dagster-plus/management/tokens",
+    tokenPrefix: "",
+    tokenLabel: "User Token",
+    extraFields: [
+      {
+        key: "org_name",
+        label: "Organization Name",
+        placeholder: "your-org-name",
+      },
+    ],
+    difficulty: "API Key + Config",
+  },
 };
 
 // GET /api/services/status
