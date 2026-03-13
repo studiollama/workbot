@@ -484,6 +484,34 @@ const SERVICES: Record<string, ServiceConfig> = {
     ],
     difficulty: "API Key + Config",
   },
+
+  render: {
+    name: "Render",
+    validateUrl: "https://api.render.com/v1/owners",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => {
+      const owners = Array.isArray(data) ? data : data?.owners ?? [];
+      return owners[0]?.owner?.name ?? owners[0]?.owner?.email ?? "Connected";
+    },
+    tokenUrl: "https://render.com/docs/api#creating-an-api-key",
+    tokenPrefix: "rnd_",
+    difficulty: "API Key",
+  },
+
+  supabase: {
+    name: "Supabase",
+    validateUrl: "https://api.supabase.com/v1/projects",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => {
+      const projects = Array.isArray(data) ? data : [];
+      return projects.length > 0
+        ? `${projects.length} project(s)`
+        : "Connected";
+    },
+    tokenUrl: "https://supabase.com/dashboard/account/tokens",
+    tokenPrefix: "sbp_",
+    difficulty: "API Key",
+  },
 };
 
 // GET /api/services/status

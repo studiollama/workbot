@@ -27,6 +27,8 @@ const SERVICE_ICONS: Record<string, string> = {
   ticktick: "TT",
   readai: "RA",
   dagster: "DG",
+  render: "RN",
+  supabase: "SB",
 };
 
 export default function Dashboard() {
