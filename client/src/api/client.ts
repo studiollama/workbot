@@ -30,6 +30,8 @@ export interface ServiceConfig {
 
 export interface DashboardConfig {
   enabledServices: string[];
+  workbotName?: string;
+  accentColor?: string;
 }
 
 export interface DeviceCodeResponse {
@@ -83,9 +85,9 @@ export const api = {
   getDashboardConfig: () =>
     request<DashboardConfig>("/services/dashboard"),
 
-  saveDashboardConfig: (enabledServices: string[]) =>
+  saveDashboardConfig: (config: DashboardConfig) =>
     request<{ ok: boolean }>("/services/dashboard", {
       method: "PUT",
-      body: JSON.stringify({ enabledServices }),
+      body: JSON.stringify(config),
     }),
 };

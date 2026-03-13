@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { useServices } from "../context/ServicesContext";
 import ServiceDrawer from "../components/ServiceDrawer";
+import SettingsModal from "../components/SettingsModal";
 
 const SERVICE_ICONS: Record<string, string> = {
   github: "GH",
@@ -29,8 +30,10 @@ const SERVICE_ICONS: Record<string, string> = {
 };
 
 export default function Dashboard() {
-  const { services, config, enabledServices, loading, refresh } = useServices();
+  const { services, config, enabledServices, workbotName, loading, refresh } =
+    useServices();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   if (loading) {
     return (
@@ -45,26 +48,47 @@ export default function Dashboard() {
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Workbot</h1>
+            <h1 className="text-2xl font-bold">{workbotName}</h1>
             <p className="text-gray-400 text-sm mt-1">Service Connections</p>
           </div>
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition"
-            title="Configure services"
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
+          <div className="flex items-center gap-2">
+            {/* Settings button */}
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition"
+              title="Settings"
             >
-              <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-              <path d="M16.2 12.8a1.3 1.3 0 00.26 1.43l.05.05a1.575 1.575 0 11-2.23 2.23l-.05-.05a1.3 1.3 0 00-1.43-.26 1.3 1.3 0 00-.79 1.19v.14a1.575 1.575 0 11-3.15 0v-.07a1.3 1.3 0 00-.85-1.19 1.3 1.3 0 00-1.43.26l-.05.05a1.575 1.575 0 11-2.23-2.23l.05-.05a1.3 1.3 0 00.26-1.43 1.3 1.3 0 00-1.19-.79h-.14a1.575 1.575 0 110-3.15h.07a1.3 1.3 0 001.19-.85 1.3 1.3 0 00-.26-1.43l-.05-.05a1.575 1.575 0 112.23-2.23l.05.05a1.3 1.3 0 001.43.26h.06a1.3 1.3 0 00.79-1.19v-.14a1.575 1.575 0 013.15 0v.07a1.3 1.3 0 00.79 1.19 1.3 1.3 0 001.43-.26l.05-.05a1.575 1.575 0 112.23 2.23l-.05.05a1.3 1.3 0 00-.26 1.43v.06a1.3 1.3 0 001.19.79h.14a1.575 1.575 0 010 3.15h-.07a1.3 1.3 0 00-1.19.79z" />
-            </svg>
-          </button>
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <circle cx="10" cy="10" r="4" />
+                <circle cx="10" cy="10" r="8" strokeDasharray="2 3" />
+              </svg>
+            </button>
+            {/* Service drawer button */}
+            <button
+              onClick={() => setDrawerOpen(true)}
+              className="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition"
+              title="Configure services"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                <path d="M16.2 12.8a1.3 1.3 0 00.26 1.43l.05.05a1.575 1.575 0 11-2.23 2.23l-.05-.05a1.3 1.3 0 00-1.43-.26 1.3 1.3 0 00-.79 1.19v.14a1.575 1.575 0 11-3.15 0v-.07a1.3 1.3 0 00-.85-1.19 1.3 1.3 0 00-1.43.26l-.05.05a1.575 1.575 0 11-2.23-2.23l.05-.05a1.3 1.3 0 00.26-1.43 1.3 1.3 0 00-1.19-.79h-.14a1.575 1.575 0 110-3.15h.07a1.3 1.3 0 001.19-.85 1.3 1.3 0 00-.26-1.43l-.05-.05a1.575 1.575 0 112.23-2.23l.05.05a1.3 1.3 0 001.43.26h.06a1.3 1.3 0 00.79-1.19v-.14a1.575 1.575 0 013.15 0v.07a1.3 1.3 0 00.79 1.19 1.3 1.3 0 001.43-.26l.05-.05a1.575 1.575 0 112.23 2.23l-.05.05a1.3 1.3 0 00-.26 1.43v.06a1.3 1.3 0 001.19.79h.14a1.575 1.575 0 010 3.15h-.07a1.3 1.3 0 00-1.19.79z" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {(() => {
@@ -130,6 +154,10 @@ export default function Dashboard() {
       </div>
 
       <ServiceDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }
@@ -196,7 +224,11 @@ function ServiceCard({
     setError("");
     setBusy(true);
     try {
-      await api.connectService(serviceKey, token, extraFields ? extras : undefined);
+      await api.connectService(
+        serviceKey,
+        token,
+        extraFields ? extras : undefined
+      );
       setToken("");
       setExtras({});
       setShowForm(false);
@@ -282,14 +314,18 @@ function ServiceCard({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {difficulty && (() => {
-            const style = DIFFICULTY_STYLES[difficulty] ?? DIFFICULTY_STYLES["API Key"];
-            return (
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${style.bg} ${style.text}`}>
-                {difficulty}
-              </span>
-            );
-          })()}
+          {difficulty &&
+            (() => {
+              const style =
+                DIFFICULTY_STYLES[difficulty] ?? DIFFICULTY_STYLES["API Key"];
+              return (
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${style.bg} ${style.text}`}
+                >
+                  {difficulty}
+                </span>
+              );
+            })()}
           <span
             className={`w-3 h-3 rounded-full ${
               status.connected ? "bg-green-500" : "bg-gray-600"
@@ -322,7 +358,7 @@ function ServiceCard({
           {!showForm ? (
             <button
               onClick={() => setShowForm(true)}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
+              className="w-full bg-accent-600 hover:bg-accent-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
             >
               Connect
             </button>
@@ -335,9 +371,12 @@ function ServiceCard({
                   placeholder={field.placeholder}
                   value={extras[field.key] ?? ""}
                   onChange={(e) =>
-                    setExtras((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    setExtras((prev) => ({
+                      ...prev,
+                      [field.key]: e.target.value,
+                    }))
                   }
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                 />
               ))}
               <input
@@ -345,7 +384,7 @@ function ServiceCard({
                 placeholder={tokenPlaceholder}
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
               />
               {authNote && (
                 <p className="text-xs text-yellow-400">{authNote}</p>
@@ -354,7 +393,7 @@ function ServiceCard({
                 <button
                   type="submit"
                   disabled={busy || !token.trim()}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
+                  className="flex-1 bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
                 >
                   {busy ? "Validating..." : "Connect"}
                 </button>
@@ -376,7 +415,7 @@ function ServiceCard({
                   href={tokenUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block text-xs text-blue-400 hover:underline"
+                  className="block text-xs text-accent-400 hover:underline"
                 >
                   Get a token →
                 </a>
@@ -397,7 +436,7 @@ function ServiceCard({
                   href={deviceCode.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 underline"
+                  className="text-accent-400 underline"
                 >
                   {deviceCode.url}
                 </a>{" "}

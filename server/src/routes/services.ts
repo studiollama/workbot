@@ -77,7 +77,13 @@ async function getAzureADToken(
 // Dashboard layout persistence
 const DASHBOARD_PATH = join(STORE_DIR, "dashboard.json");
 
-function loadDashboardConfig(): { enabledServices: string[] } | null {
+interface DashboardConfig {
+  enabledServices: string[];
+  workbotName?: string;
+  accentColor?: string;
+}
+
+function loadDashboardConfig(): DashboardConfig | null {
   try {
     if (!existsSync(DASHBOARD_PATH)) return null;
     return JSON.parse(readFileSync(DASHBOARD_PATH, "utf-8"));
@@ -86,7 +92,7 @@ function loadDashboardConfig(): { enabledServices: string[] } | null {
   }
 }
 
-function saveDashboardConfig(config: { enabledServices: string[] }) {
+function saveDashboardConfig(config: DashboardConfig) {
   if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
   writeFileSync(DASHBOARD_PATH, JSON.stringify(config, null, 2));
 }
@@ -635,13 +641,16 @@ router.get("/dashboard", (_req, res) => {
   }
 });
 
-// PUT /api/services/dashboard — saves enabled services list (ordered)
+// PUT /api/services/dashboard — saves enabled services list + settings
 router.put("/dashboard", (req, res) => {
-  const { enabledServices } = req.body;
+  const { enabledServices, workbotName, accentColor } = req.body;
   if (!Array.isArray(enabledServices)) {
     return res.status(400).json({ error: "enabledServices must be an array" });
   }
-  saveDashboardConfig({ enabledServices });
+  const config: DashboardConfig = { enabledServices };
+  if (typeof workbotName === "string") config.workbotName = workbotName;
+  if (typeof accentColor === "string") config.accentColor = accentColor;
+  saveDashboardConfig(config);
   res.json({ ok: true });
 });
 

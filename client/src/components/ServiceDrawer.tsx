@@ -116,7 +116,7 @@ export default function ServiceDrawer({ open, onClose }: ServiceDrawerProps) {
                   onDragEnd={handleDragEnd}
                   className={`flex items-center gap-2 p-2 rounded-lg mb-1 cursor-grab active:cursor-grabbing select-none transition-colors ${
                     overIdx === idx && dragIdx !== null && dragIdx !== idx
-                      ? "bg-blue-900/30 border border-blue-500/30"
+                      ? "bg-accent-900/30 border border-accent-500/30"
                       : "bg-gray-900 hover:bg-gray-800"
                   }`}
                 >

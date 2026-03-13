@@ -1,3 +1,21 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --accent-400: 96 165 250;   /* blue-400 */
+  --accent-500: 59 130 246;   /* blue-500 */
+  --accent-600: 37 99 235;    /* blue-600 */
+  --accent-700: 29 78 216;    /* blue-700 */
+  --accent-900: 30 58 138;    /* blue-900 */
+}
+
+/* Accent color utilities — dynamic via CSS custom properties */
+.bg-accent-600 { background-color: rgb(var(--accent-600)); }
+.bg-accent-700 { background-color: rgb(var(--accent-700)); }
+.bg-accent-900\/30 { background-color: rgb(var(--accent-900) / 0.3); }
+.text-accent-400 { color: rgb(var(--accent-400)); }
+.ring-accent-500 { --tw-ring-color: rgb(var(--accent-500)); }
+.border-accent-500\/30 { border-color: rgb(var(--accent-500) / 0.3); }
+.focus\:ring-accent-500:focus { --tw-ring-color: rgb(var(--accent-500)); }
+.hover\:bg-accent-700:hover { background-color: rgb(var(--accent-700)); }
