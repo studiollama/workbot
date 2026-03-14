@@ -51,10 +51,15 @@ export default function DevPanel() {
     }
   }
 
+  async function refreshAll() {
+    const s = await fetchStatus();
+    if (s?.cloneStatus === "cloned") await fetchRepoData();
+    return s;
+  }
+
   useEffect(() => {
     (async () => {
-      const s = await fetchStatus();
-      if (s?.cloneStatus === "cloned") await fetchRepoData();
+      await refreshAll();
       setLoading(false);
     })();
     return () => clearInterval(pollRef.current);
@@ -320,6 +325,16 @@ export default function DevPanel() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => refreshAll()}
+              className="p-1.5 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
+              title="Refresh"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 1v5h5" />
+                <path d="M3.51 10a6 6 0 1 0 .7-6.2L1 6" />
+              </svg>
+            </button>
             <button
               onClick={handleClone}
               className="text-xs bg-surface-input hover:bg-surface-hover border border-theme-input rounded-lg px-3 py-1.5 transition"
