@@ -6,6 +6,8 @@ import authRoutes from "./routes/auth.js";
 import codexRoutes from "./routes/codex.js";
 import servicesRoutes from "./routes/services.js";
 import mcpRoutes from "./routes/mcp.js";
+import devRoutes from "./routes/development.js";
+import { loadMcpConfig } from "./mcp-config.js";
 
 declare module "express-session" {
   interface SessionData {
@@ -17,7 +19,8 @@ declare module "express-session" {
 }
 
 const app = express();
-const PORT = parseInt(process.env.PORT ?? "3001", 10);
+const mcpConfig = loadMcpConfig();
+const PORT = parseInt(process.env.PORT ?? String(mcpConfig.serverPort), 10);
 
 app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 app.use(express.json());
@@ -38,6 +41,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/codex", codexRoutes);
 app.use("/api/services", servicesRoutes);
 app.use("/api/mcp", mcpRoutes);
+app.use("/api/dev", devRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

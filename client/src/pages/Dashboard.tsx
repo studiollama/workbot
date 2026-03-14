@@ -4,6 +4,7 @@ import { useServices } from "../context/ServicesContext";
 import ServiceDrawer from "../components/ServiceDrawer";
 import SettingsModal from "../components/SettingsModal";
 import McpPanel from "../components/McpPanel";
+import DevPanel from "../components/DevPanel";
 
 const SERVICE_ICONS: Record<string, string> = {
   github: "GH",
@@ -33,11 +34,11 @@ const SERVICE_ICONS: Record<string, string> = {
 };
 
 export default function Dashboard() {
-  const { services, config, enabledServices, workbotName, loading, refresh } =
+  const { services, config, enabledServices, workbotName, loading, refresh, setEnabledServices } =
     useServices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"services" | "mcp">("services");
+  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development">("services");
 
   if (loading) {
     return (
@@ -55,44 +56,17 @@ export default function Dashboard() {
             <h1 className="text-2xl font-bold">{workbotName}</h1>
             <p className="text-theme-secondary text-sm mt-1">Service Connections</p>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Settings button */}
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
-              title="Settings"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <circle cx="10" cy="10" r="4" />
-                <circle cx="10" cy="10" r="8" strokeDasharray="2 3" />
-              </svg>
-            </button>
-            {/* Service drawer button */}
-            <button
-              onClick={() => setDrawerOpen(true)}
-              className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
-              title="Configure services"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-                <path d="M16.2 12.8a1.3 1.3 0 00.26 1.43l.05.05a1.575 1.575 0 11-2.23 2.23l-.05-.05a1.3 1.3 0 00-1.43-.26 1.3 1.3 0 00-.79 1.19v.14a1.575 1.575 0 11-3.15 0v-.07a1.3 1.3 0 00-.85-1.19 1.3 1.3 0 00-1.43.26l-.05.05a1.575 1.575 0 11-2.23-2.23l.05-.05a1.3 1.3 0 00.26-1.43 1.3 1.3 0 00-1.19-.79h-.14a1.575 1.575 0 110-3.15h.07a1.3 1.3 0 001.19-.85 1.3 1.3 0 00-.26-1.43l-.05-.05a1.575 1.575 0 112.23-2.23l.05.05a1.3 1.3 0 001.43.26h.06a1.3 1.3 0 00.79-1.19v-.14a1.575 1.575 0 013.15 0v.07a1.3 1.3 0 00.79 1.19 1.3 1.3 0 001.43-.26l.05-.05a1.575 1.575 0 112.23 2.23l-.05.05a1.3 1.3 0 00-.26 1.43v.06a1.3 1.3 0 001.19.79h.14a1.575 1.575 0 010 3.15h-.07a1.3 1.3 0 00-1.19.79z" />
-              </svg>
-            </button>
-          </div>
+          {/* Settings (gear) */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
+            title="Settings"
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+              <path d="M16.2 12.8a1.3 1.3 0 00.26 1.43l.05.05a1.575 1.575 0 11-2.23 2.23l-.05-.05a1.3 1.3 0 00-1.43-.26 1.3 1.3 0 00-.79 1.19v.14a1.575 1.575 0 11-3.15 0v-.07a1.3 1.3 0 00-.85-1.19 1.3 1.3 0 00-1.43.26l-.05.05a1.575 1.575 0 11-2.23-2.23l.05-.05a1.3 1.3 0 00.26-1.43 1.3 1.3 0 00-1.19-.79h-.14a1.575 1.575 0 110-3.15h.07a1.3 1.3 0 001.19-.85 1.3 1.3 0 00-.26-1.43l-.05-.05a1.575 1.575 0 112.23-2.23l.05.05a1.3 1.3 0 001.43.26h.06a1.3 1.3 0 00.79-1.19v-.14a1.575 1.575 0 013.15 0v.07a1.3 1.3 0 00.79 1.19 1.3 1.3 0 001.43-.26l.05-.05a1.575 1.575 0 112.23 2.23l-.05.05a1.3 1.3 0 00-.26 1.43v.06a1.3 1.3 0 001.19.79h.14a1.575 1.575 0 010 3.15h-.07a1.3 1.3 0 00-1.19.79z" />
+            </svg>
+          </button>
         </div>
 
         {/* Tab bar */}
@@ -117,9 +91,20 @@ export default function Dashboard() {
           >
             MCP
           </button>
+          <button
+            onClick={() => setActiveTab("development")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              activeTab === "development"
+                ? "border-accent-500 text-theme-primary"
+                : "border-transparent text-theme-secondary hover:text-theme-primary"
+            }`}
+          >
+            Development
+          </button>
         </div>
 
         {activeTab === "mcp" && <McpPanel />}
+        {activeTab === "development" && <DevPanel />}
 
         {activeTab === "services" && (() => {
           const connected = enabledServices.filter(
@@ -127,6 +112,44 @@ export default function Dashboard() {
           );
           const disconnected = enabledServices.filter(
             (key) => !services[key]?.connected
+          );
+
+          function handleDisableAll() {
+            const connectedOnly = enabledServices.filter(
+              (key) => services[key]?.connected
+            );
+            setEnabledServices(connectedOnly);
+          }
+
+          const hasDisconnectedEnabled = enabledServices.some(
+            (key) => !services[key]?.connected
+          );
+
+          const toggleButton = (
+            <div className="flex items-center gap-2">
+              {hasDisconnectedEnabled && (
+                <button
+                  onClick={handleDisableAll}
+                  className="text-xs text-theme-secondary hover:text-theme-primary transition"
+                >
+                  Hide disconnected
+                </button>
+              )}
+              <button
+                onClick={() => setDrawerOpen(true)}
+                className="p-1.5 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
+                title="Enable / disable services"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <line x1="2" y1="4" x2="14" y2="4" />
+                  <line x1="2" y1="8" x2="14" y2="8" />
+                  <line x1="2" y1="12" x2="14" y2="12" />
+                  <circle cx="5" cy="4" r="1.5" fill="currentColor" />
+                  <circle cx="11" cy="8" r="1.5" fill="currentColor" />
+                  <circle cx="7" cy="12" r="1.5" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
           );
 
           const renderCard = (key: string) => (
@@ -149,9 +172,12 @@ export default function Dashboard() {
             <>
               {connected.length > 0 && (
                 <div className="space-y-3">
-                  <p className="text-xs text-theme-secondary uppercase tracking-wider">
-                    Connected ({connected.length})
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-theme-secondary uppercase tracking-wider">
+                      Connected ({connected.length})
+                    </p>
+                    {toggleButton}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {connected.map(renderCard)}
                   </div>
@@ -160,9 +186,12 @@ export default function Dashboard() {
 
               {disconnected.length > 0 && (
                 <div className="space-y-3">
-                  <p className="text-xs text-theme-secondary uppercase tracking-wider">
-                    Available ({disconnected.length})
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-theme-secondary uppercase tracking-wider">
+                      Available ({disconnected.length})
+                    </p>
+                    {connected.length === 0 && toggleButton}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {disconnected.map(renderCard)}
                   </div>
@@ -170,8 +199,14 @@ export default function Dashboard() {
               )}
 
               {enabledServices.length === 0 && (
-                <div className="bg-surface-card/50 border border-theme border-dashed rounded-xl p-8 text-center text-theme-muted">
-                  No services enabled. Click the gear icon to add services.
+                <div className="bg-surface-card/50 border border-theme border-dashed rounded-xl p-8 text-center text-theme-muted space-y-3">
+                  <p>No services enabled.</p>
+                  <button
+                    onClick={() => setDrawerOpen(true)}
+                    className="text-sm text-accent-400 hover:text-accent-300 transition"
+                  >
+                    Add services
+                  </button>
                 </div>
               )}
             </>

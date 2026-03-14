@@ -54,6 +54,8 @@ export interface McpConfigData {
   qmdCliPath: string | null;
   nodePath: string;
   agentsFilePath: string;
+  claudeMdPath: string;
+  serverPort: number;
 }
 
 export interface McpTool {
@@ -70,6 +72,51 @@ export interface McpStatus {
   qmdAvailable: boolean;
   error?: string;
   details?: string;
+}
+
+// --- Development types ---
+
+export interface DevStatus {
+  repoUrl: string | null;
+  owner: string | null;
+  repo: string | null;
+  cloneStatus: "idle" | "cloning" | "cloned" | "error";
+  cloneError: string | null;
+  lastClonedAt: string | null;
+  analysisStatus: "idle" | "running" | "done" | "error";
+  analysisError: string | null;
+  githubConnected: boolean;
+}
+
+export interface GitCommit {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+export interface GitIssue {
+  number: number;
+  title: string;
+  state: string;
+  user: string;
+  labels: string[];
+  created_at: string;
+}
+
+export interface GitPR {
+  number: number;
+  title: string;
+  state: string;
+  user: string;
+  head: string;
+  base: string;
+  created_at: string;
+}
+
+export interface EnvFile {
+  filename: string;
+  entries: { key: string; value: string }[];
 }
 
 // --- API ---
@@ -125,4 +172,40 @@ export const api = {
     }),
 
   getMcpStatus: () => request<McpStatus>("/mcp/status"),
+
+  pickFile: () =>
+    request<{ path: string }>("/mcp/pick-file", { method: "POST" }),
+
+  // Development
+  getDevStatus: () => request<DevStatus>("/dev/status"),
+
+  setDevRepo: (repoUrl: string) =>
+    request<{ ok: boolean }>("/dev/repo", {
+      method: "POST",
+      body: JSON.stringify({ repoUrl }),
+    }),
+
+  removeDevRepo: () =>
+    request<{ ok: boolean }>("/dev/repo", { method: "DELETE" }),
+
+  startClone: () =>
+    request<{ ok: boolean }>("/dev/clone", { method: "POST" }),
+
+  getDevCommits: () => request<GitCommit[]>("/dev/commits"),
+
+  getDevIssues: () => request<GitIssue[]>("/dev/issues"),
+
+  getDevPulls: () => request<GitPR[]>("/dev/pulls"),
+
+  getDevEnvFiles: (reveal?: boolean) =>
+    request<EnvFile[]>(`/dev/env${reveal ? "?reveal=true" : ""}`),
+
+  updateDevEnvFile: (file: string, entries: { key: string; value: string }[]) =>
+    request<{ ok: boolean }>("/dev/env", {
+      method: "PUT",
+      body: JSON.stringify({ file, entries }),
+    }),
+
+  startAnalysis: () =>
+    request<{ ok: boolean }>("/dev/analyze", { method: "POST" }),
 };

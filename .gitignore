@@ -4,6 +4,7 @@ dist/
 *.log
 .workbot/
 .codex/
+development/
 
 # Workbot brain content (gitignored per CLAUDE.md)
 workbot-brain/context/

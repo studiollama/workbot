@@ -8,12 +8,16 @@ export interface McpConfig {
   qmdCliPath: string | null;
   nodePath: string;
   agentsFilePath: string;
+  claudeMdPath: string;
+  serverPort: number;
 }
 
 const DEFAULTS: McpConfig = {
   qmdCliPath: null,
   nodePath: process.execPath.replace(/\\/g, "/"),
   agentsFilePath: "AGENTS.md",
+  claudeMdPath: "CLAUDE.md",
+  serverPort: 3001,
 };
 
 export function loadMcpConfig(): McpConfig {
@@ -24,6 +28,8 @@ export function loadMcpConfig(): McpConfig {
       qmdCliPath: typeof raw.qmdCliPath === "string" ? raw.qmdCliPath : null,
       nodePath: typeof raw.nodePath === "string" ? raw.nodePath : DEFAULTS.nodePath,
       agentsFilePath: typeof raw.agentsFilePath === "string" ? raw.agentsFilePath : DEFAULTS.agentsFilePath,
+      claudeMdPath: typeof raw.claudeMdPath === "string" ? raw.claudeMdPath : DEFAULTS.claudeMdPath,
+      serverPort: typeof raw.serverPort === "number" ? raw.serverPort : DEFAULTS.serverPort,
     };
   } catch {
     return { ...DEFAULTS };
