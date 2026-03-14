@@ -14,7 +14,7 @@ router.get("/config", (_req, res) => {
 
 // PUT /api/mcp/config — saves MCP config
 router.put("/config", (req, res) => {
-  const { qmdCliPath, nodePath, agentsFilePath, claudeMdPath, serverPort } = req.body;
+  const { qmdCliPath, nodePath, agentsFilePath, claudeMdPath, serverPort, clientPort } = req.body;
   const updates: Record<string, unknown> = {};
   if (typeof qmdCliPath === "string" || qmdCliPath === null) {
     updates.qmdCliPath = qmdCliPath;
@@ -30,6 +30,9 @@ router.put("/config", (req, res) => {
   }
   if (typeof serverPort === "number" && serverPort > 0 && serverPort < 65536) {
     updates.serverPort = serverPort;
+  }
+  if (typeof clientPort === "number" && clientPort > 0 && clientPort < 65536) {
+    updates.clientPort = clientPort;
   }
   saveMcpConfig(updates);
   res.json({ ok: true });

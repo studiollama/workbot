@@ -56,6 +56,7 @@ export interface McpConfigData {
   agentsFilePath: string;
   claudeMdPath: string;
   serverPort: number;
+  clientPort: number;
 }
 
 export interface McpTool {
@@ -131,6 +132,7 @@ export interface Skill {
   riskNote: string;
   installed: boolean;
   curated: boolean;
+  builtIn?: boolean;
 }
 
 // --- API ---

@@ -147,6 +147,13 @@ router.post("/:id/install", async (req, res) => {
     return res.status(404).json({ error: "Skill not found" });
   }
 
+  // Built-in skills don't need download — they ship with Claude Code
+  if (skill.builtIn) {
+    skill.installed = true;
+    saveSkills(skills);
+    return res.json({ ok: true, installed: true, size: 0, builtIn: true });
+  }
+
   try {
     const content = await fetchSkillMd(skill.githubUrl);
     if (!content) {

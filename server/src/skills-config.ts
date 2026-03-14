@@ -14,9 +14,23 @@ export interface Skill {
   riskNote: string;
   installed: boolean;
   curated: boolean;
+  builtIn?: boolean; // true = ships with Claude Code, no SKILL.md download needed
 }
 
 export const CURATED_SKILLS: Skill[] = [
+  // ── Workbot Core ────────────────────────────────────────────────────────
+  {
+    id: "brain-boot",
+    name: "Brain Boot",
+    description: "Mandatory session bootstrap. Loads brain context, checks agent reports, and enforces brain-first behavior every session.",
+    githubUrl: "https://github.com/studiollama/workbot",
+    enabled: true,
+    risk: "low",
+    riskNote: "Core workbot skill. Calls brain MCP tools (read-only bootstrap). No external network calls, no code execution.",
+    installed: true,
+    curated: true,
+    builtIn: true,
+  },
   // ── Official Anthropic Skills ──────────────────────────────────────────
   {
     id: "frontend-design",
@@ -26,8 +40,9 @@ export const CURATED_SKILLS: Skill[] = [
     enabled: false,
     risk: "low",
     riskNote: "Official Anthropic skill. Markdown instructions only, no executable code.",
-    installed: false,
+    installed: true,
     curated: true,
+    builtIn: true,
   },
   {
     id: "webapp-testing",
@@ -37,8 +52,9 @@ export const CURATED_SKILLS: Skill[] = [
     enabled: false,
     risk: "low",
     riskNote: "Official Anthropic skill. Ships with Claude Code.",
-    installed: false,
+    installed: true,
     curated: true,
+    builtIn: true,
   },
   {
     id: "pdf",
@@ -48,8 +64,9 @@ export const CURATED_SKILLS: Skill[] = [
     enabled: false,
     risk: "low",
     riskNote: "Official Anthropic skill. Ships with Claude Code.",
-    installed: false,
+    installed: true,
     curated: true,
+    builtIn: true,
   },
   {
     id: "skill-creator",
@@ -59,8 +76,9 @@ export const CURATED_SKILLS: Skill[] = [
     enabled: false,
     risk: "low",
     riskNote: "Official Anthropic skill. Ships with Claude Code.",
-    installed: false,
+    installed: true,
     curated: true,
+    builtIn: true,
   },
   {
     id: "mcp-builder",
@@ -70,8 +88,9 @@ export const CURATED_SKILLS: Skill[] = [
     enabled: false,
     risk: "low",
     riskNote: "Official Anthropic skill. Ships with Claude Code.",
-    installed: false,
+    installed: true,
     curated: true,
+    builtIn: true,
   },
   {
     id: "code-review",
@@ -81,8 +100,9 @@ export const CURATED_SKILLS: Skill[] = [
     enabled: false,
     risk: "low",
     riskNote: "Official Anthropic plugin. Reads code, optionally posts PR comments via gh CLI. Does not modify source.",
-    installed: false,
+    installed: true,
     curated: true,
+    builtIn: true,
   },
   {
     id: "security-guidance",
@@ -92,8 +112,9 @@ export const CURATED_SKILLS: Skill[] = [
     enabled: false,
     risk: "low",
     riskNote: "Official Anthropic plugin. Hook-only monitoring, no code modification, no external network calls.",
-    installed: false,
+    installed: true,
     curated: true,
+    builtIn: true,
   },
   // ── Platform Skills (Supabase / Vercel) ────────────────────────────────
   {

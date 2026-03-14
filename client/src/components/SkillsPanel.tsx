@@ -44,6 +44,31 @@ export default function SkillsPanel() {
 
   async function handleToggle(id: string) {
     try {
+      const skill = skills.find((s) => s.id === id);
+      if (skill && !skill.builtIn) {
+        // Auto-install when enabling a non-built-in skill
+        if (!skill.enabled && !skill.installed) {
+          try {
+            await api.installSkill(id);
+            setSkills((prev) =>
+              prev.map((s) => (s.id === id ? { ...s, installed: true } : s))
+            );
+          } catch {
+            // Install failed — still toggle
+          }
+        }
+        // Auto-uninstall when disabling a non-built-in skill
+        if (skill.enabled && skill.installed) {
+          try {
+            await api.uninstallSkill(id);
+            setSkills((prev) =>
+              prev.map((s) => (s.id === id ? { ...s, installed: false } : s))
+            );
+          } catch {
+            // Uninstall failed — still toggle
+          }
+        }
+      }
       await api.toggleSkill(id);
       setSkills((prev) =>
         prev.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s))

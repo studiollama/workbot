@@ -15,6 +15,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [agentsPath, setAgentsPath] = useState("AGENTS.md");
   const [claudeMdPath, setClaudeMdPath] = useState("CLAUDE.md");
   const [serverPort, setServerPort] = useState(3001);
+  const [clientPort, setClientPort] = useState(5173);
   const [savedField, setSavedField] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pathDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -28,6 +29,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         setAgentsPath(info.config.agentsFilePath || "AGENTS.md");
         setClaudeMdPath(info.config.claudeMdPath || "CLAUDE.md");
         setServerPort(info.config.serverPort || 3001);
+        setClientPort(info.config.clientPort || 5173);
       }).catch(() => {});
     }
   }, [open, workbotName, accentColor]);
@@ -66,16 +68,17 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     savePathConfig("claudeMdPath", value || "CLAUDE.md");
   }
 
-  function handlePortChange(value: string) {
+  function handlePortChange(field: "serverPort" | "clientPort", value: string) {
     const port = parseInt(value, 10);
     if (isNaN(port)) return;
-    setServerPort(port);
+    if (field === "serverPort") setServerPort(port);
+    else setClientPort(port);
     clearTimeout(pathDebounceRef.current);
     setSavedField(null);
     pathDebounceRef.current = setTimeout(() => {
       if (port > 0 && port < 65536) {
-        api.updateMcpConfig({ serverPort: port } as any).then(() => {
-          setSavedField("serverPort");
+        api.updateMcpConfig({ [field]: port } as any).then(() => {
+          setSavedField(field);
           setTimeout(() => setSavedField(null), 2000);
         }).catch(() => {});
       }
@@ -216,26 +219,47 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             </p>
           </div>
 
-          {/* Server port */}
+          {/* Ports */}
           <div className="space-y-2 pt-1">
-            <label className="text-xs text-theme-secondary uppercase tracking-wider">
-              Server Port
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                value={serverPort}
-                onChange={(e) => handlePortChange(e.target.value)}
-                min={1}
-                max={65535}
-                className="w-28 bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 font-mono"
-              />
-              {savedField === "serverPort" && (
-                <span className="text-xs text-green-400 whitespace-nowrap">Saved</span>
-              )}
+            <p className="text-xs text-theme-secondary uppercase tracking-wider">
+              Ports
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs text-theme-secondary">Server (Express)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={serverPort}
+                    onChange={(e) => handlePortChange("serverPort", e.target.value)}
+                    min={1}
+                    max={65535}
+                    className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 font-mono"
+                  />
+                  {savedField === "serverPort" && (
+                    <span className="text-xs text-green-400 whitespace-nowrap">Saved</span>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-theme-secondary">Client (Vite)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={clientPort}
+                    onChange={(e) => handlePortChange("clientPort", e.target.value)}
+                    min={1}
+                    max={65535}
+                    className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 font-mono"
+                  />
+                  {savedField === "clientPort" && (
+                    <span className="text-xs text-green-400 whitespace-nowrap">Saved</span>
+                  )}
+                </div>
+              </div>
             </div>
             <p className="text-xs text-theme-secondary">
-              Restart the server for port changes to take effect.
+              Restart for port changes to take effect.
             </p>
           </div>
         </div>
