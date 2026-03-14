@@ -631,68 +631,113 @@ function EnvManager({
   return (
     <div className="bg-surface-card rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h4 className="text-xs text-theme-secondary uppercase tracking-wider">
-          Environment Files
-        </h4>
+        <div className="flex items-center gap-3">
+          <h4 className="text-xs text-theme-secondary uppercase tracking-wider">
+            Environment Files
+          </h4>
+          <div className="flex items-center gap-1">
+            {envFiles.map((f, idx) => (
+              <button
+                key={f.filename}
+                onClick={() => setActiveFile(idx)}
+                className={`text-xs px-2 py-1 rounded transition ${
+                  idx === activeFile
+                    ? "bg-accent-600 text-white"
+                    : "bg-surface-input text-theme-secondary hover:text-theme-primary"
+                }`}
+              >
+                {f.filename}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-2">
-          {envFiles.map((f, idx) => (
+          <button
+            onClick={() => handleReveal(current.filename)}
+            className="text-xs text-theme-secondary hover:text-theme-primary transition"
+          >
+            {revealed[current.filename] ? "Hide values" : "Reveal & Edit"}
+          </button>
+          {editing && editing.file === current.filename && (
             <button
-              key={f.filename}
-              onClick={() => setActiveFile(idx)}
-              className={`text-xs px-2 py-1 rounded transition ${
-                idx === activeFile
-                  ? "bg-accent-600 text-white"
-                  : "bg-surface-input text-theme-secondary hover:text-theme-primary"
-              }`}
+              onClick={handleSave}
+              disabled={saving}
+              className="text-xs bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white px-3 py-1 rounded-lg transition"
             >
-              {f.filename}
+              {saving ? "Saving..." : "Save"}
             </button>
-          ))}
+          )}
         </div>
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1 max-h-72 overflow-y-auto">
         {displayEntries.map((entry, idx) => (
           <div key={idx} className="flex items-center gap-2 text-xs font-mono">
-            <span className="text-theme-secondary w-40 shrink-0 truncate">
-              {entry.key}
-            </span>
-            <span className="text-theme-muted">=</span>
             {editing && editing.file === current.filename ? (
-              <input
-                type="text"
-                value={entry.value}
-                onChange={(e) => {
-                  const newEntries = [...editing.entries];
-                  newEntries[idx] = { ...newEntries[idx], value: e.target.value };
-                  setEditing({ ...editing, entries: newEntries });
-                }}
-                className="flex-1 bg-surface-input border border-theme-input rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent-500"
-              />
+              <>
+                <input
+                  type="text"
+                  value={entry.key}
+                  onChange={(e) => {
+                    const newEntries = [...editing.entries];
+                    newEntries[idx] = { ...newEntries[idx], key: e.target.value };
+                    setEditing({ ...editing, entries: newEntries });
+                  }}
+                  className="w-40 shrink-0 bg-surface-input border border-theme-input rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent-500"
+                />
+                <span className="text-theme-muted">=</span>
+                <input
+                  type="text"
+                  value={entry.value}
+                  onChange={(e) => {
+                    const newEntries = [...editing.entries];
+                    newEntries[idx] = { ...newEntries[idx], value: e.target.value };
+                    setEditing({ ...editing, entries: newEntries });
+                  }}
+                  className="flex-1 bg-surface-input border border-theme-input rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent-500"
+                />
+                <button
+                  onClick={() => {
+                    const newEntries = editing.entries.filter((_, i) => i !== idx);
+                    setEditing({ ...editing, entries: newEntries });
+                  }}
+                  className="text-theme-muted hover:text-red-400 transition shrink-0"
+                  title="Remove"
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <path d="M4 4l8 8M12 4l-8 8" />
+                  </svg>
+                </button>
+              </>
             ) : (
-              <span className="text-theme-muted truncate">{entry.value}</span>
+              <>
+                <span className="text-theme-secondary w-40 shrink-0 truncate">
+                  {entry.key}
+                </span>
+                <span className="text-theme-muted">=</span>
+                <span className="text-theme-muted truncate">{entry.value}</span>
+              </>
             )}
           </div>
         ))}
       </div>
 
-      <div className="flex items-center gap-2">
+      {editing && editing.file === current.filename && (
         <button
-          onClick={() => handleReveal(current.filename)}
-          className="text-xs text-theme-secondary hover:text-theme-primary transition"
+          onClick={() => {
+            setEditing({
+              ...editing,
+              entries: [...editing.entries, { key: "", value: "" }],
+            });
+          }}
+          className="text-xs text-theme-secondary hover:text-theme-primary transition flex items-center gap-1"
         >
-          {revealed[current.filename] ? "Hide values" : "Reveal & Edit"}
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M8 3v10M3 8h10" />
+          </svg>
+          Add variable
         </button>
-        {editing && editing.file === current.filename && (
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="text-xs bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white px-3 py-1 rounded-lg transition"
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 }
