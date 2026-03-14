@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { resolve } from "path";
 import { loadMcpConfig, saveMcpConfig, MCP_TOOLS } from "../mcp-config.js";
 
 const router = Router();
@@ -82,6 +84,37 @@ if ($d.ShowDialog() -eq "OK") { Write-Output $d.FileName } else { exit 1 }
   } catch {
     res.status(400).json({ error: "File picker cancelled" });
   }
+});
+
+// POST /api/mcp/restart — save port config (restart happens externally)
+router.post("/restart", (req, res) => {
+  const { serverPort, clientPort } = req.body;
+  const newServerPort = typeof serverPort === "number" && serverPort > 0 && serverPort < 65536
+    ? serverPort : undefined;
+  const newClientPort = typeof clientPort === "number" && clientPort > 0 && clientPort < 65536
+    ? clientPort : undefined;
+
+  const updates: Record<string, unknown> = {};
+  if (newServerPort !== undefined) updates.serverPort = newServerPort;
+  if (newClientPort !== undefined) updates.clientPort = newClientPort;
+
+  saveMcpConfig(updates);
+  const config = loadMcpConfig();
+
+  // Sync launch.json (gitignored) so preview system uses correct ports
+  const launchPath = resolve(__dirname, "../../.claude/launch.json");
+  try {
+    if (existsSync(launchPath)) {
+      const launch = JSON.parse(readFileSync(launchPath, "utf-8"));
+      for (const cfg of launch.configurations) {
+        if (cfg.name === "workbot-server") cfg.port = config.serverPort;
+        if (cfg.name === "workbot-client") cfg.port = config.clientPort;
+      }
+      writeFileSync(launchPath, JSON.stringify(launch, null, 2) + "\n");
+    }
+  } catch { /* launch.json may not exist */ }
+
+  res.json({ ok: true, serverPort: config.serverPort, clientPort: config.clientPort });
 });
 
 export default router;

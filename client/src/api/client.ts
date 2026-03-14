@@ -189,6 +189,12 @@ export const api = {
 
   getMcpStatus: () => request<McpStatus>("/mcp/status"),
 
+  restartServer: (ports: { serverPort?: number; clientPort?: number }) =>
+    request<{ ok: boolean; serverPort: number; clientPort: number }>("/mcp/restart", {
+      method: "POST",
+      body: JSON.stringify(ports),
+    }),
+
   pickFile: () =>
     request<{ path: string }>("/mcp/pick-file", { method: "POST" }),
 

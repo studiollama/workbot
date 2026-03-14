@@ -17,8 +17,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [serverPort, setServerPort] = useState(3001);
   const [clientPort, setClientPort] = useState(5173);
   const [savedField, setSavedField] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pathDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const portDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Sync local state when modal opens
   useEffect(() => {
@@ -73,9 +75,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     if (isNaN(port)) return;
     if (field === "serverPort") setServerPort(port);
     else setClientPort(port);
-    clearTimeout(pathDebounceRef.current);
+    clearTimeout(portDebounceRef.current);
     setSavedField(null);
-    pathDebounceRef.current = setTimeout(() => {
+    portDebounceRef.current = setTimeout(() => {
       if (port > 0 && port < 65536) {
         api.updateMcpConfig({ [field]: port } as any).then(() => {
           setSavedField(field);
@@ -83,6 +85,17 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         }).catch(() => {});
       }
     }, 600);
+  }
+
+  function handleApplyPorts() {
+    setRestarting("ports");
+    api.restartServer({ serverPort, clientPort }).then(() => {
+      setRestarting(null);
+      setSavedField("ports");
+      setTimeout(() => setSavedField(null), 2000);
+    }).catch(() => {
+      setRestarting(null);
+    });
   }
 
   async function handleBrowse(setter: (v: string) => void, configField: string) {
@@ -106,9 +119,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       />
 
       {/* Modal */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
+      <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-0 sm:p-4">
         <div
-          className="bg-surface-card border border-theme sm:rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl min-h-screen sm:min-h-0 sm:my-auto"
+          className="bg-surface-card border border-theme sm:rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl h-screen sm:h-auto sm:max-h-[90vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -258,9 +271,18 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </div>
               </div>
             </div>
-            <p className="text-xs text-theme-secondary">
-              Restart for port changes to take effect.
-            </p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleApplyPorts}
+                disabled={restarting === "ports"}
+                className="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition"
+              >
+                {restarting === "ports" ? "Saving..." : "Apply & Restart"}
+              </button>
+              {savedField === "ports" && (
+                <span className="text-xs text-green-400">Saved — restart servers to apply</span>
+              )}
+            </div>
           </div>
         </div>
       </div>

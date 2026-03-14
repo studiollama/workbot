@@ -1,4 +1,4 @@
-/** 51 accent colors: 50 rainbow + 1 mono (10 cols × 5 rows + special).
+/** 50 accent colors: 49 rainbow + 1 mono (10 cols × 5 rows).
  *  Shades are space-separated RGB channels for CSS variable alpha support.
  *  Hex is the 500-shade for the swatch preview. */
 
@@ -122,6 +122,9 @@ export const ACCENT_COLORS: AccentColor[] = [
   { id: "slate-1",   hex: "#64748b", shades: { 400: "148 163 184", 500: "100 116 139",  600: "71 85 105",  700: "51 65 85",    900: "15 23 42"   } },
   { id: "slate-2",   hex: "#94a3b8", shades: { 400: "203 213 225", 500: "148 163 184",  600: "100 116 139",700: "71 85 105",   900: "30 41 59"   } },
   { id: "cool-1",    hex: "#6b7280", shades: { 400: "156 163 175", 500: "107 114 128",  600: "75 85 99",   700: "55 65 81",    900: "17 24 39"   } },
+  { id: "stone-1",   hex: "#78716c", shades: { 400: "168 162 158", 500: "120 113 108",  600: "87 83 78",   700: "68 64 60",    900: "28 25 23"   } },
+  { id: "copper-1",  hex: "#b87333", shades: { 400: "205 149 87",  500: "184 115 51",   600: "153 96 42",  700: "122 76 34",   900: "71 44 20"   } },
+  { id: "steel-1",   hex: "#4682b4", shades: { 400: "114 168 206", 500: "70 130 180",   600: "56 104 144", 700: "42 78 108",   900: "21 39 54"   } },
 ];
 
 export const DEFAULT_ACCENT_ID = "blue-1";

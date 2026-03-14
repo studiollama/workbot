@@ -6,6 +6,7 @@ dist/
 .codex/
 development/
 .claude/skills/
+.claude/launch.json
 
 # Workbot brain content (gitignored per CLAUDE.md)
 workbot-brain/context/
