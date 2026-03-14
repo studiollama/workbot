@@ -5,6 +5,7 @@ dist/
 .workbot/
 .codex/
 development/
+.claude/skills/
 
 # Workbot brain content (gitignored per CLAUDE.md)
 workbot-brain/context/

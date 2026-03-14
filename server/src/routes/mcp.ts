@@ -49,7 +49,7 @@ router.get("/status", async (_req, res) => {
     const { stdout } = await execFileAsync(
       nodePath,
       [qmdPath, "status"],
-      { timeout: 10_000, stdio: ["pipe", "pipe", "pipe"] }
+      { timeout: 10_000 }
     );
     res.json({ qmdAvailable: true, details: stdout.trim() });
   } catch (err: any) {

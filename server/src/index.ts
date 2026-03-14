@@ -7,6 +7,7 @@ import codexRoutes from "./routes/codex.js";
 import servicesRoutes from "./routes/services.js";
 import mcpRoutes from "./routes/mcp.js";
 import devRoutes from "./routes/development.js";
+import skillsRoutes from "./routes/skills.js";
 import { loadMcpConfig } from "./mcp-config.js";
 
 declare module "express-session" {
@@ -42,6 +43,7 @@ app.use("/api/codex", codexRoutes);
 app.use("/api/services", servicesRoutes);
 app.use("/api/mcp", mcpRoutes);
 app.use("/api/dev", devRoutes);
+app.use("/api/skills", skillsRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

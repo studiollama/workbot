@@ -5,6 +5,7 @@ import ServiceDrawer from "../components/ServiceDrawer";
 import SettingsModal from "../components/SettingsModal";
 import McpPanel from "../components/McpPanel";
 import DevPanel from "../components/DevPanel";
+import SkillsPanel from "../components/SkillsPanel";
 
 const SERVICE_ICONS: Record<string, string> = {
   github: "GH",
@@ -38,7 +39,7 @@ export default function Dashboard() {
     useServices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development">("services");
+  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills">("services");
 
   if (loading) {
     return (
@@ -101,10 +102,21 @@ export default function Dashboard() {
           >
             Development
           </button>
+          <button
+            onClick={() => setActiveTab("skills")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              activeTab === "skills"
+                ? "border-accent-500 text-theme-primary"
+                : "border-transparent text-theme-secondary hover:text-theme-primary"
+            }`}
+          >
+            Skills
+          </button>
         </div>
 
         {activeTab === "mcp" && <McpPanel />}
         {activeTab === "development" && <DevPanel />}
+        {activeTab === "skills" && <SkillsPanel />}
 
         {activeTab === "services" && (() => {
           const connected = enabledServices.filter(

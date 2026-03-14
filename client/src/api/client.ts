@@ -119,6 +119,20 @@ export interface EnvFile {
   entries: { key: string; value: string }[];
 }
 
+// --- Skills types ---
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  githubUrl: string;
+  enabled: boolean;
+  risk: "low" | "medium" | "high" | "unknown";
+  riskNote: string;
+  installed: boolean;
+  curated: boolean;
+}
+
 // --- API ---
 
 export const api = {
@@ -208,4 +222,31 @@ export const api = {
 
   startAnalysis: () =>
     request<{ ok: boolean }>("/dev/analyze", { method: "POST" }),
+
+  // Skills
+  getSkills: () => request<Skill[]>("/skills"),
+
+  toggleSkill: (id: string) =>
+    request<{ ok: boolean; enabled: boolean }>(`/skills/${id}/toggle`, {
+      method: "PUT",
+    }),
+
+  addSkill: (githubUrl: string, name?: string, description?: string) =>
+    request<Skill>("/skills", {
+      method: "POST",
+      body: JSON.stringify({ githubUrl, name, description }),
+    }),
+
+  removeSkill: (id: string) =>
+    request<{ ok: boolean }>(`/skills/${id}`, { method: "DELETE" }),
+
+  installSkill: (id: string) =>
+    request<{ ok: boolean; installed: boolean; size: number }>(`/skills/${id}/install`, {
+      method: "POST",
+    }),
+
+  uninstallSkill: (id: string) =>
+    request<{ ok: boolean }>(`/skills/${id}/uninstall`, {
+      method: "POST",
+    }),
 };
