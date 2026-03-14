@@ -3,14 +3,30 @@
 @tailwind utilities;
 
 :root {
-  --accent-400: 96 165 250;   /* blue-400 */
-  --accent-500: 59 130 246;   /* blue-500 */
-  --accent-600: 37 99 235;    /* blue-600 */
-  --accent-700: 29 78 216;    /* blue-700 */
-  --accent-900: 30 58 138;    /* blue-900 */
+  /* Accent (buttons, links, focus) */
+  --accent-400: 96 165 250;
+  --accent-500: 59 130 246;
+  --accent-600: 37 99 235;
+  --accent-700: 29 78 216;
+  --accent-900: 30 58 138;
+
+  /* Surfaces (backgrounds) */
+  --surface-page: 3 7 18;
+  --surface-card: 17 24 39;
+  --surface-input: 31 41 55;
+  --surface-hover: 55 65 81;
+
+  /* Borders */
+  --border-default: 31 41 55;
+  --border-input: 55 65 81;
+
+  /* Text */
+  --text-primary: 243 244 246;
+  --text-secondary: 156 163 175;
+  --text-muted: 107 114 128;
 }
 
-/* Accent color utilities — dynamic via CSS custom properties */
+/* === Accent utilities === */
 .bg-accent-600 { background-color: rgb(var(--accent-600)); }
 .bg-accent-700 { background-color: rgb(var(--accent-700)); }
 .bg-accent-900\/30 { background-color: rgb(var(--accent-900) / 0.3); }
@@ -19,3 +35,27 @@
 .border-accent-500\/30 { border-color: rgb(var(--accent-500) / 0.3); }
 .focus\:ring-accent-500:focus { --tw-ring-color: rgb(var(--accent-500)); }
 .hover\:bg-accent-700:hover { background-color: rgb(var(--accent-700)); }
+
+/* === Surface utilities === */
+.bg-surface-page { background-color: rgb(var(--surface-page)); }
+.bg-surface-card { background-color: rgb(var(--surface-card)); }
+.bg-surface-card\/50 { background-color: rgb(var(--surface-card) / 0.5); }
+.bg-surface-input { background-color: rgb(var(--surface-input)); }
+.bg-surface-hover { background-color: rgb(var(--surface-hover)); }
+.bg-surface-hover\/50 { background-color: rgb(var(--surface-hover) / 0.5); }
+.hover\:bg-surface-hover:hover { background-color: rgb(var(--surface-hover)); }
+.hover\:bg-surface-input:hover { background-color: rgb(var(--surface-input)); }
+.hover\:bg-surface-input\/50:hover { background-color: rgb(var(--surface-input) / 0.5); }
+
+/* === Border utilities === */
+.border-theme { border-color: rgb(var(--border-default)); }
+.border-theme-input { border-color: rgb(var(--border-input)); }
+
+/* === Text utilities === */
+.text-theme-primary { color: rgb(var(--text-primary)); }
+.text-theme-secondary { color: rgb(var(--text-secondary)); }
+.text-theme-muted { color: rgb(var(--text-muted)); }
+.hover\:text-theme-primary:hover { color: rgb(var(--text-primary)); }
+
+/* === Ring offset for color picker === */
+.ring-offset-surface-card { --tw-ring-offset-color: rgb(var(--surface-card)); }

@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useServices } from "../context/ServicesContext";
 import ServiceDrawer from "../components/ServiceDrawer";
 import SettingsModal from "../components/SettingsModal";
+import McpPanel from "../components/McpPanel";
 
 const SERVICE_ICONS: Record<string, string> = {
   github: "GH",
@@ -36,6 +37,7 @@ export default function Dashboard() {
     useServices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"services" | "mcp">("services");
 
   if (loading) {
     return (
@@ -51,13 +53,13 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">{workbotName}</h1>
-            <p className="text-gray-400 text-sm mt-1">Service Connections</p>
+            <p className="text-theme-secondary text-sm mt-1">Service Connections</p>
           </div>
           <div className="flex items-center gap-2">
             {/* Settings button */}
             <button
               onClick={() => setSettingsOpen(true)}
-              className="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition"
+              className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
               title="Settings"
             >
               <svg
@@ -75,7 +77,7 @@ export default function Dashboard() {
             {/* Service drawer button */}
             <button
               onClick={() => setDrawerOpen(true)}
-              className="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition"
+              className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
               title="Configure services"
             >
               <svg
@@ -93,7 +95,33 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {(() => {
+        {/* Tab bar */}
+        <div className="flex gap-1 border-b border-theme">
+          <button
+            onClick={() => setActiveTab("services")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              activeTab === "services"
+                ? "border-accent-500 text-theme-primary"
+                : "border-transparent text-theme-secondary hover:text-theme-primary"
+            }`}
+          >
+            Services
+          </button>
+          <button
+            onClick={() => setActiveTab("mcp")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              activeTab === "mcp"
+                ? "border-accent-500 text-theme-primary"
+                : "border-transparent text-theme-secondary hover:text-theme-primary"
+            }`}
+          >
+            MCP
+          </button>
+        </div>
+
+        {activeTab === "mcp" && <McpPanel />}
+
+        {activeTab === "services" && (() => {
           const connected = enabledServices.filter(
             (key) => services[key]?.connected
           );
@@ -121,7 +149,7 @@ export default function Dashboard() {
             <>
               {connected.length > 0 && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-400 uppercase tracking-wider">
+                  <p className="text-xs text-theme-secondary uppercase tracking-wider">
                     Connected ({connected.length})
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -132,7 +160,7 @@ export default function Dashboard() {
 
               {disconnected.length > 0 && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-400 uppercase tracking-wider">
+                  <p className="text-xs text-theme-secondary uppercase tracking-wider">
                     Available ({disconnected.length})
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -142,7 +170,7 @@ export default function Dashboard() {
               )}
 
               {enabledServices.length === 0 && (
-                <div className="bg-gray-900/50 border border-gray-800 border-dashed rounded-xl p-8 text-center text-gray-500">
+                <div className="bg-surface-card/50 border border-theme border-dashed rounded-xl p-8 text-center text-theme-muted">
                   No services enabled. Click the gear icon to add services.
                 </div>
               )}
@@ -150,9 +178,11 @@ export default function Dashboard() {
           );
         })()}
 
-        <div className="bg-gray-900/50 border border-gray-800 border-dashed rounded-xl p-8 text-center text-gray-500">
-          Orchestration workspace coming soon
-        </div>
+        {activeTab === "services" && (
+          <div className="bg-surface-card/50 border border-theme border-dashed rounded-xl p-8 text-center text-theme-muted">
+            Orchestration workspace coming soon
+          </div>
+        )}
       </div>
 
       <ServiceDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
@@ -164,13 +194,13 @@ export default function Dashboard() {
   );
 }
 
-const DIFFICULTY_STYLES: Record<string, { bg: string; text: string }> = {
-  "API Key": { bg: "bg-green-900/40", text: "text-green-400" },
-  "API Key + Config": { bg: "bg-blue-900/40", text: "text-blue-400" },
-  "OAuth Token": { bg: "bg-yellow-900/40", text: "text-yellow-400" },
-  "Admin + OAuth": { bg: "bg-orange-900/40", text: "text-orange-400" },
-  "Enterprise App": { bg: "bg-purple-900/40", text: "text-purple-400" },
-  "Device Login": { bg: "bg-gray-800/60", text: "text-gray-400" },
+const DIFFICULTY_STYLES: Record<string, { bg: string; text: string; border: string }> = {
+  "API Key": { bg: "bg-green-500/15", text: "text-green-600", border: "border border-green-500/30" },
+  "API Key + Config": { bg: "bg-blue-500/15", text: "text-blue-600", border: "border border-blue-500/30" },
+  "OAuth Token": { bg: "bg-yellow-500/15", text: "text-yellow-600", border: "border border-yellow-500/30" },
+  "Admin + OAuth": { bg: "bg-orange-500/15", text: "text-orange-600", border: "border border-orange-500/30" },
+  "Enterprise App": { bg: "bg-purple-500/15", text: "text-purple-600", border: "border border-purple-500/30" },
+  "Device Login": { bg: "bg-surface-hover/50", text: "text-theme-muted", border: "border border-theme" },
 };
 
 function ServiceCard({
@@ -301,17 +331,17 @@ function ServiceCard({
       : "API Token";
 
   return (
-    <div className="bg-gray-900 rounded-xl p-5 space-y-3">
+    <div className="bg-surface-card rounded-xl p-5 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center text-sm font-bold text-gray-400">
+          <div className="w-10 h-10 rounded-lg bg-surface-input flex items-center justify-center text-sm font-bold text-theme-secondary">
             {SERVICE_ICONS[serviceKey] ?? "?"}
           </div>
           <div>
             <h3 className="font-medium">{name}</h3>
             {status.connected && status.user && (
-              <p className="text-xs text-gray-400">{status.user}</p>
+              <p className="text-xs text-theme-secondary">{status.user}</p>
             )}
           </div>
         </div>
@@ -322,15 +352,15 @@ function ServiceCard({
                 DIFFICULTY_STYLES[difficulty] ?? DIFFICULTY_STYLES["API Key"];
               return (
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${style.bg} ${style.text}`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${style.bg} ${style.text} ${style.border}`}
                 >
                   {difficulty}
                 </span>
               );
             })()}
           <span
-            className={`w-3 h-3 rounded-full ${
-              status.connected ? "bg-green-500" : "bg-gray-600"
+            className={`w-3 h-3 rounded-full border ${
+              status.connected ? "bg-green-500 border-green-500" : "bg-surface-hover border-theme"
             }`}
           />
         </div>
@@ -348,7 +378,7 @@ function ServiceCard({
         <button
           onClick={handleDisconnect}
           disabled={busy}
-          className="text-sm text-gray-400 hover:text-red-400 transition"
+          className="text-sm text-theme-secondary hover:text-red-400 transition"
         >
           Disconnect
         </button>
@@ -378,7 +408,7 @@ function ServiceCard({
                       [field.key]: e.target.value,
                     }))
                   }
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                  className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                 />
               ))}
               <input
@@ -386,7 +416,7 @@ function ServiceCard({
                 placeholder={tokenPlaceholder}
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
               />
               {authNote && (
                 <p className="text-xs text-yellow-400">{authNote}</p>
@@ -407,7 +437,7 @@ function ServiceCard({
                     setExtras({});
                     setError("");
                   }}
-                  className="text-sm text-gray-400 hover:text-gray-200 px-3"
+                  className="text-sm text-theme-secondary hover:text-theme-primary px-3"
                 >
                   Cancel
                 </button>
@@ -444,13 +474,13 @@ function ServiceCard({
                 </a>{" "}
                 and enter:
               </p>
-              <div className="bg-gray-800 rounded-lg p-3 text-center">
+              <div className="bg-surface-input rounded-lg p-3 text-center">
                 <span className="text-lg font-mono font-bold tracking-widest">
                   {deviceCode.code}
                 </span>
               </div>
               {polling && (
-                <p className="text-xs text-gray-400 flex items-center gap-2">
+                <p className="text-xs text-theme-secondary flex items-center gap-2">
                   <span className="inline-block w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
                   Waiting for login...
                 </p>

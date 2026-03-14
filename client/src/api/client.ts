@@ -48,6 +48,30 @@ export interface CodexPing {
   error?: string;
 }
 
+// --- MCP types ---
+
+export interface McpConfigData {
+  qmdCliPath: string | null;
+  nodePath: string;
+  agentsFilePath: string;
+}
+
+export interface McpTool {
+  name: string;
+  description: string;
+}
+
+export interface McpInfo {
+  config: McpConfigData;
+  tools: McpTool[];
+}
+
+export interface McpStatus {
+  qmdAvailable: boolean;
+  error?: string;
+  details?: string;
+}
+
 // --- API ---
 
 export const api = {
@@ -90,4 +114,15 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(config),
     }),
+
+  // MCP
+  getMcpConfig: () => request<McpInfo>("/mcp/config"),
+
+  updateMcpConfig: (config: Partial<McpConfigData>) =>
+    request<{ ok: boolean }>("/mcp/config", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+
+  getMcpStatus: () => request<McpStatus>("/mcp/status"),
 };

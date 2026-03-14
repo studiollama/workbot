@@ -5,6 +5,7 @@ import cors from "cors";
 import authRoutes from "./routes/auth.js";
 import codexRoutes from "./routes/codex.js";
 import servicesRoutes from "./routes/services.js";
+import mcpRoutes from "./routes/mcp.js";
 
 declare module "express-session" {
   interface SessionData {
@@ -36,6 +37,7 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/codex", codexRoutes);
 app.use("/api/services", servicesRoutes);
+app.use("/api/mcp", mcpRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

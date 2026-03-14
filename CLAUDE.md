@@ -83,6 +83,47 @@ The workbot dashboard (`client/` + `server/`) manages connections to external se
 - How to add new services
 - API endpoints reference
 
+## Agent Context Bridge — AGENTS.md
+
+Workbot manages cloud agents (Codex, Jules, etc.) that work on the project but don't have brain access. `AGENTS.md` is the two-way context bridge.
+
+### How it works
+
+- **AGENTS.md** lives in the project root (path configurable in dashboard Settings)
+- Workbot (you) curates what context cloud agents need
+- Cloud agents append findings to the `## Agent Reports` section
+- Workbot assimilates agent reports back into the brain
+
+### When to sync (outbound: brain → AGENTS.md)
+
+At end of session, after updating `context/ACTIVE.md`, also update AGENTS.md if:
+- Active tasks or focus changed
+- New decisions were made that agents need to respect
+- New patterns or corrections were discovered
+
+Use `agents_read` to check current state, then `agents_write` with updated content.
+
+**What to include:** Project context, active tasks, key decisions, patterns/corrections — only what's actionable for agents. Keep it concise (<200 lines). Strip brain-internal details (graph links, tags, aliases).
+
+**What NOT to include:** Credentials, token paths, brain structure details, personal info.
+
+### When to assimilate (inbound: AGENTS.md → brain)
+
+At start of session, after reading `context/ACTIVE.md`, check AGENTS.md for new agent reports:
+1. `agents_read` — check the `## Agent Reports` section
+2. If reports exist, extract reusable knowledge into brain notes
+3. Clear the processed reports from AGENTS.md (rewrite without them)
+
+### AGENTS.md sections
+
+| Section | Managed by | Purpose |
+|---------|-----------|---------|
+| `## Project` | Workbot (🔒) | Tech stack, structure, conventions |
+| `## Active Context` | Workbot (🔒) | Current focus, tasks, blockers |
+| `## Key Decisions` | Workbot (🔒) | Architecture choices to respect |
+| `## Patterns & Corrections` | Workbot (🔒) | What works / what to avoid |
+| `## Agent Reports` | Cloud agents | Findings to be assimilated |
+
 ## Search Layer
 
 QMD (`@tobilu/qmd`) indexes all brain markdown into SQLite with BM25 + vector semantic search. Available as MCP server. See `_system/QMD-SETUP.md` for install/config.
@@ -104,7 +145,7 @@ QMD (`@tobilu/qmd`) indexes all brain markdown into SQLite with BM25 + vector se
 ## Content Boundary
 
 **Never commit:** business data, content dirs (`context/`, `knowledge/`, `inbox/`, `archive/`), names, credentials, `.workbot/`, `.codex/`
-**Always commit:** framework files (`_system/`, `_templates/`, `_frameworks/`), vault config, app source code
+**Always commit:** framework files (`_system/`, `_templates/`, `_frameworks/`), vault config, app source code, `AGENTS.md`
 
 ## Dev Environment
 

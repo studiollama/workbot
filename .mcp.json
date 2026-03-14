@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "workbot": {
+      "command": "node",
+      "args": ["node_modules/tsx/dist/cli.mjs", "server/src/mcp.ts"]
+    }
+  }
+}

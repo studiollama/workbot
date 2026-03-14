@@ -1,14 +1,72 @@
-/** 50 accent colors in rainbow order (10 cols × 5 rows).
- *  Shades are space-separated RGB channels for Tailwind CSS variable alpha support.
+/** 51 accent colors: 50 rainbow + 1 mono (10 cols × 5 rows + special).
+ *  Shades are space-separated RGB channels for CSS variable alpha support.
  *  Hex is the 500-shade for the swatch preview. */
 
 export interface AccentColor {
   id: string;
-  hex: string; // preview color (500-shade hex)
+  hex: string; // preview swatch color
+  mono?: boolean; // special mono flag
   shades: { 400: string; 500: string; 600: string; 700: string; 900: string };
 }
 
+/** Parse "r g b" string into [r, g, b] tuple */
+function parse(rgb: string): [number, number, number] {
+  const [r, g, b] = rgb.split(" ").map(Number);
+  return [r, g, b];
+}
+
+/** Mix an accent color into a base gray at a given ratio */
+function tint(
+  base: [number, number, number],
+  accent: [number, number, number],
+  ratio: number
+): string {
+  return base
+    .map((b, i) => Math.round(b + (accent[i] - b) * ratio))
+    .join(" ");
+}
+
+/** Generate surface/border/text theme from an accent color's 500-shade */
+export function generateTheme(color: AccentColor) {
+  if (color.mono) {
+    return {
+      surfaces: {
+        page: "255 255 255",
+        card: "255 255 255",
+        input: "245 245 245",
+        hover: "235 235 235",
+      },
+      borders: { default: "0 0 0", input: "0 0 0" },
+      text: { primary: "0 0 0", secondary: "64 64 64", muted: "128 128 128" },
+    };
+  }
+
+  const accent = parse(color.shades[500]);
+  const t = 0.08; // subtle tint ratio
+
+  return {
+    surfaces: {
+      page: tint([3, 7, 18], accent, t),       // gray-950 base
+      card: tint([17, 24, 39], accent, t),      // gray-900 base
+      input: tint([31, 41, 55], accent, t),     // gray-800 base
+      hover: tint([55, 65, 81], accent, t),     // gray-700 base
+    },
+    borders: {
+      default: tint([31, 41, 55], accent, 0.12),  // gray-800 + more tint
+      input: tint([55, 65, 81], accent, 0.12),     // gray-700 + more tint
+    },
+    text: {
+      primary: "243 244 246",    // gray-100 (stays constant for readability)
+      secondary: "156 163 175",  // gray-400
+      muted: "107 114 128",     // gray-500
+    },
+  };
+}
+
 export const ACCENT_COLORS: AccentColor[] = [
+  // Mono — special black & white theme
+  { id: "mono", hex: "#000000", mono: true, shades: { 400: "0 0 0", 500: "0 0 0", 600: "0 0 0", 700: "30 30 30", 900: "0 0 0" } },
+
   // Row 1: Reds → Oranges
   { id: "red-1",     hex: "#ef4444", shades: { 400: "248 113 113", 500: "239 68 68",   600: "220 38 38",   700: "185 28 28",   900: "127 29 29"  } },
   { id: "red-2",     hex: "#dc2626", shades: { 400: "239 68 68",   500: "220 38 38",   600: "185 28 28",   700: "153 27 27",   900: "100 20 20"  } },
@@ -19,9 +77,9 @@ export const ACCENT_COLORS: AccentColor[] = [
   { id: "amber-1",   hex: "#f59e0b", shades: { 400: "251 191 36",  500: "245 158 11",  600: "217 119 6",   700: "180 83 9",    900: "120 53 15"  } },
   { id: "amber-2",   hex: "#d97706", shades: { 400: "245 158 11",  500: "217 119 6",   600: "180 83 9",    700: "146 64 14",   900: "102 44 12"  } },
   { id: "yellow-1",  hex: "#eab308", shades: { 400: "250 204 21",  500: "234 179 8",   600: "202 138 4",   700: "161 98 7",    900: "113 63 18"  } },
-  { id: "yellow-2",  hex: "#ca8a04", shades: { 400: "234 179 8",   500: "202 138 4",   600: "161 98 7",    700: "133 77 14",   900: "98 55 13"   } },
 
   // Row 2: Yellows → Limes → Greens
+  { id: "yellow-2",  hex: "#ca8a04", shades: { 400: "234 179 8",   500: "202 138 4",   600: "161 98 7",    700: "133 77 14",   900: "98 55 13"   } },
   { id: "lime-1",    hex: "#84cc16", shades: { 400: "163 230 53",  500: "132 204 22",  600: "101 163 13",  700: "77 124 15",   900: "54 83 20"   } },
   { id: "lime-2",    hex: "#65a30d", shades: { 400: "132 204 22",  500: "101 163 13",  600: "77 124 15",   700: "63 98 18",    900: "44 69 14"   } },
   { id: "green-1",   hex: "#22c55e", shades: { 400: "74 222 128",  500: "34 197 94",   600: "22 163 74",   700: "21 128 61",   900: "20 83 45"   } },
@@ -30,10 +88,10 @@ export const ACCENT_COLORS: AccentColor[] = [
   { id: "emerald-2", hex: "#059669", shades: { 400: "16 185 129",  500: "5 150 105",   600: "4 120 87",    700: "6 95 70",     900: "4 64 47"    } },
   { id: "teal-1",    hex: "#14b8a6", shades: { 400: "45 212 191",  500: "20 184 166",  600: "13 148 136",  700: "15 118 110",  900: "19 78 74"   } },
   { id: "teal-2",    hex: "#0d9488", shades: { 400: "20 184 166",  500: "13 148 136",  600: "15 118 110",  700: "17 94 89",    900: "14 63 60"   } },
+
+  // Row 3: Cyans → Blues
   { id: "cyan-1",    hex: "#06b6d4", shades: { 400: "34 211 238",  500: "6 182 212",   600: "8 145 178",   700: "14 116 144",  900: "22 78 99"   } },
   { id: "cyan-2",    hex: "#0891b2", shades: { 400: "6 182 212",   500: "8 145 178",   600: "14 116 144",  700: "21 94 117",   900: "18 63 78"   } },
-
-  // Row 3: Sky → Blues
   { id: "sky-1",     hex: "#0ea5e9", shades: { 400: "56 189 248",  500: "14 165 233",  600: "2 132 199",   700: "3 105 161",   900: "12 74 110"  } },
   { id: "sky-2",     hex: "#0284c7", shades: { 400: "14 165 233",  500: "2 132 199",   600: "3 105 161",   700: "3 85 135",    900: "8 60 90"    } },
   { id: "blue-1",    hex: "#3b82f6", shades: { 400: "96 165 250",  500: "59 130 246",  600: "37 99 235",   700: "29 78 216",   900: "30 58 138"  } },
@@ -41,33 +99,29 @@ export const ACCENT_COLORS: AccentColor[] = [
   { id: "blue-3",    hex: "#1d4ed8", shades: { 400: "37 99 235",   500: "29 78 216",   600: "30 64 175",   700: "29 54 148",   900: "20 40 100"  } },
   { id: "indigo-1",  hex: "#6366f1", shades: { 400: "129 140 248", 500: "99 102 241",  600: "79 70 229",   700: "67 56 202",   900: "49 46 129"  } },
   { id: "indigo-2",  hex: "#4f46e5", shades: { 400: "99 102 241",  500: "79 70 229",   600: "67 56 202",   700: "55 48 163",   900: "40 37 108"  } },
+
+  // Row 4: Indigos → Purples → Fuchsias
   { id: "indigo-3",  hex: "#4338ca", shades: { 400: "79 70 229",   500: "67 56 202",   600: "55 48 163",   700: "49 46 129",   900: "35 33 90"   } },
   { id: "violet-1",  hex: "#8b5cf6", shades: { 400: "167 139 250", 500: "139 92 246",  600: "124 58 237",  700: "109 40 217",  900: "76 29 149"  } },
   { id: "violet-2",  hex: "#7c3aed", shades: { 400: "139 92 246",  500: "124 58 237",  600: "109 40 217",  700: "91 33 182",   900: "62 24 122"  } },
-
-  // Row 4: Purples → Fuchsias
   { id: "violet-3",  hex: "#6d28d9", shades: { 400: "124 58 237",  500: "109 40 217",  600: "91 33 182",   700: "76 29 149",   900: "52 22 102"  } },
   { id: "purple-1",  hex: "#a855f7", shades: { 400: "192 132 252", 500: "168 85 247",  600: "147 51 234",  700: "126 34 206",  900: "88 28 135"  } },
   { id: "purple-2",  hex: "#9333ea", shades: { 400: "168 85 247",  500: "147 51 234",  600: "126 34 206",  700: "107 33 168",  900: "72 22 110"  } },
   { id: "purple-3",  hex: "#7e22ce", shades: { 400: "147 51 234",  500: "126 34 206",  600: "107 33 168",  700: "88 28 135",   900: "60 18 92"   } },
   { id: "fuchsia-1", hex: "#d946ef", shades: { 400: "232 121 249", 500: "217 70 239",  600: "192 38 211",  700: "162 28 175",  900: "112 26 117" } },
   { id: "fuchsia-2", hex: "#c026d3", shades: { 400: "217 70 239",  500: "192 38 211",  600: "162 28 175",  700: "134 25 143",  900: "92 20 98"   } },
+
+  // Row 5: Pinks → Neutrals
   { id: "fuchsia-3", hex: "#a21caf", shades: { 400: "192 38 211",  500: "162 28 175",  600: "134 25 143",  700: "112 26 117",  900: "76 18 80"   } },
   { id: "pink-1",    hex: "#ec4899", shades: { 400: "244 114 182", 500: "236 72 153",  600: "219 39 119",  700: "190 24 93",   900: "131 24 67"  } },
   { id: "pink-2",    hex: "#db2777", shades: { 400: "236 72 153",  500: "219 39 119",  600: "190 24 93",   700: "157 23 77",   900: "110 18 56"  } },
   { id: "pink-3",    hex: "#be185d", shades: { 400: "219 39 119",  500: "190 24 93",   600: "157 23 77",   700: "131 24 67",   900: "92 18 48"   } },
-
-  // Row 5: Pinks → Roses → warm neutrals
   { id: "rose-3",    hex: "#fb7185", shades: { 400: "253 164 175", 500: "251 113 133",  600: "244 63 94",  700: "225 29 72",   900: "136 19 55"  } },
-  { id: "rose-4",    hex: "#f87171", shades: { 400: "254 202 202", 500: "252 165 165",  600: "248 113 113",700: "239 68 68",   900: "153 27 27"  } },
   { id: "warm-1",    hex: "#78716c", shades: { 400: "168 162 158", 500: "120 113 108",  600: "87 83 78",   700: "68 64 60",    900: "28 25 23"   } },
-  { id: "warm-2",    hex: "#a8a29e", shades: { 400: "214 211 209", 500: "168 162 158",  600: "120 113 108",700: "87 83 78",    900: "44 40 37"   } },
   { id: "zinc-1",    hex: "#71717a", shades: { 400: "161 161 170", 500: "113 113 122",  600: "82 82 91",   700: "63 63 70",    900: "24 24 27"   } },
-  { id: "zinc-2",    hex: "#a1a1aa", shades: { 400: "212 212 216", 500: "161 161 170",  600: "113 113 122",700: "82 82 91",    900: "39 39 42"   } },
   { id: "slate-1",   hex: "#64748b", shades: { 400: "148 163 184", 500: "100 116 139",  600: "71 85 105",  700: "51 65 85",    900: "15 23 42"   } },
   { id: "slate-2",   hex: "#94a3b8", shades: { 400: "203 213 225", 500: "148 163 184",  600: "100 116 139",700: "71 85 105",   900: "30 41 59"   } },
   { id: "cool-1",    hex: "#6b7280", shades: { 400: "156 163 175", 500: "107 114 128",  600: "75 85 99",   700: "55 65 81",    900: "17 24 39"   } },
-  { id: "cool-2",    hex: "#9ca3af", shades: { 400: "209 213 219", 500: "156 163 175",  600: "107 114 128",700: "75 85 99",    900: "31 41 55"   } },
 ];
 
 export const DEFAULT_ACCENT_ID = "blue-1";

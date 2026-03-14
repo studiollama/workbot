@@ -81,29 +81,29 @@ export default function ServiceDrawer({ open, onClose }: ServiceDrawerProps) {
 
       {/* Drawer */}
       <div
-        className={`fixed top-0 right-0 h-full w-80 bg-gray-950 border-l border-gray-800 z-50 transform transition-transform duration-200 ${
+        className={`fixed top-0 right-0 h-full w-80 bg-surface-page border-l border-theme z-50 transform transition-transform duration-200 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        <div className="flex items-center justify-between p-4 border-b border-gray-800">
+        <div className="flex items-center justify-between p-4 border-b border-theme">
           <h2 className="text-lg font-semibold">Services</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white text-xl leading-none"
+            className="text-theme-secondary hover:text-theme-primary text-xl leading-none"
           >
             &times;
           </button>
         </div>
 
         <div className="p-4 space-y-1 overflow-y-auto h-[calc(100%-60px)]">
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-theme-muted mb-3">
             Toggle services on/off. Drag enabled services to reorder.
           </p>
 
           {/* Enabled services — draggable */}
           {enabledServices.length > 0 && (
             <div className="mb-4">
-              <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">
+              <p className="text-xs text-theme-secondary uppercase tracking-wider mb-2">
                 Enabled
               </p>
               {enabledServices.map((key, idx) => (
@@ -117,11 +117,11 @@ export default function ServiceDrawer({ open, onClose }: ServiceDrawerProps) {
                   className={`flex items-center gap-2 p-2 rounded-lg mb-1 cursor-grab active:cursor-grabbing select-none transition-colors ${
                     overIdx === idx && dragIdx !== null && dragIdx !== idx
                       ? "bg-accent-900/30 border border-accent-500/30"
-                      : "bg-gray-900 hover:bg-gray-800"
+                      : "bg-surface-card hover:bg-surface-input"
                   }`}
                 >
                   {/* Drag handle */}
-                  <span className="text-gray-600 shrink-0">
+                  <span className="text-theme-muted shrink-0">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
                       <circle cx="3" cy="2" r="1.2" />
                       <circle cx="9" cy="2" r="1.2" />
@@ -151,16 +151,16 @@ export default function ServiceDrawer({ open, onClose }: ServiceDrawerProps) {
           {/* Disabled services — static */}
           {disabledKeys.length > 0 && (
             <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">
+              <p className="text-xs text-theme-secondary uppercase tracking-wider mb-2">
                 Available
               </p>
               {disabledKeys.map((key) => (
                 <div
                   key={key}
-                  className="flex items-center gap-2 p-2 rounded-lg mb-1 bg-gray-900/50 hover:bg-gray-800/50"
+                  className="flex items-center gap-2 p-2 rounded-lg mb-1 bg-surface-card/50 hover:bg-surface-input/50"
                 >
                   <div className="w-3 shrink-0" />
-                  <span className="flex-1 text-sm text-gray-400">
+                  <span className="flex-1 text-sm text-theme-secondary">
                     {config[key]?.name ?? key}
                   </span>
                   <button
