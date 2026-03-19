@@ -6,6 +6,7 @@ const MCP_CONFIG_PATH = join(STORE_DIR, "mcp.json");
 
 export interface McpConfig {
   qmdCliPath: string | null;
+  qmdIndex: string | null;
   nodePath: string;
   agentsFilePath: string;
   claudeMdPath: string;
@@ -15,6 +16,7 @@ export interface McpConfig {
 
 const DEFAULTS: McpConfig = {
   qmdCliPath: null,
+  qmdIndex: null,
   nodePath: process.execPath.replace(/\\/g, "/"),
   agentsFilePath: "AGENTS.md",
   claudeMdPath: "CLAUDE.md",
@@ -28,6 +30,7 @@ export function loadMcpConfig(): McpConfig {
     const raw = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
     return {
       qmdCliPath: typeof raw.qmdCliPath === "string" ? raw.qmdCliPath : null,
+      qmdIndex: typeof raw.qmdIndex === "string" ? raw.qmdIndex : null,
       nodePath: typeof raw.nodePath === "string" ? raw.nodePath : DEFAULTS.nodePath,
       agentsFilePath: typeof raw.agentsFilePath === "string" ? raw.agentsFilePath : DEFAULTS.agentsFilePath,
       claudeMdPath: typeof raw.claudeMdPath === "string" ? raw.claudeMdPath : DEFAULTS.claudeMdPath,

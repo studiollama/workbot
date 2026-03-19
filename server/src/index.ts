@@ -3,7 +3,11 @@ import express from "express";
 import session from "express-session";
 import cors from "cors";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import authRoutes from "./routes/auth.js";
 import codexRoutes from "./routes/codex.js";
 import servicesRoutes from "./routes/services.js";
@@ -24,7 +28,7 @@ function ensureDefaults() {
         {
           name: "workbot-server",
           runtimeExecutable: "node",
-          runtimeArgs: ["../node_modules/tsx/dist/cli.mjs", "src/index.ts"],
+          runtimeArgs: ["../node_modules/tsx/dist/cli.mjs", "watch", "src/index.ts"],
           port: config.serverPort,
           cwd: "server",
         },

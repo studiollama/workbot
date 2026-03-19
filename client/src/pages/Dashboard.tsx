@@ -31,6 +31,7 @@ const SERVICE_ICONS: Record<string, string> = {
   readai: "RA",
   dagster: "DG",
   render: "RN",
+  stripe: "ST",
   supabase: "SB",
 };
 
@@ -175,6 +176,7 @@ export default function Dashboard() {
               authNote={config[key]?.authNote}
               difficulty={config[key]?.difficulty}
               extraFields={config[key]?.extraFields}
+              oauth={config[key]?.oauth}
               status={services[key] ?? { connected: false }}
               onUpdate={refresh}
             />
@@ -245,6 +247,7 @@ const DIFFICULTY_STYLES: Record<string, { bg: string; text: string; border: stri
   "API Key": { bg: "bg-green-500/15", text: "text-green-600", border: "border border-green-500/30" },
   "API Key + Config": { bg: "bg-blue-500/15", text: "text-blue-600", border: "border border-blue-500/30" },
   "OAuth Token": { bg: "bg-yellow-500/15", text: "text-yellow-600", border: "border border-yellow-500/30" },
+  "OAuth + Credentials": { bg: "bg-yellow-500/15", text: "text-yellow-600", border: "border border-yellow-500/30" },
   "Admin + OAuth": { bg: "bg-orange-500/15", text: "text-orange-600", border: "border border-orange-500/30" },
   "Enterprise App": { bg: "bg-purple-500/15", text: "text-purple-600", border: "border border-purple-500/30" },
   "Device Login": { bg: "bg-surface-hover/50", text: "text-theme-muted", border: "border border-theme" },
@@ -259,6 +262,7 @@ function ServiceCard({
   authNote,
   difficulty,
   extraFields,
+  oauth,
   status,
   onUpdate,
 }: {
@@ -270,6 +274,7 @@ function ServiceCard({
   authNote?: string;
   difficulty?: string;
   extraFields?: { key: string; label: string; placeholder: string }[];
+  oauth?: { scopes: string[]; redirectPath: string };
   status: { connected: boolean; user?: string };
   onUpdate: () => Promise<void>;
 }) {
@@ -278,6 +283,7 @@ function ServiceCard({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [showManualToken, setShowManualToken] = useState(false);
 
   // Codex device code flow state
   const [deviceCode, setDeviceCode] = useState<{
@@ -358,6 +364,51 @@ function ServiceCard({
     }
   }
 
+  async function handleOAuthStart() {
+    if (!extras["client_id"]?.trim() || !extras["client_secret"]?.trim()) {
+      setError("Client ID and Client Secret are required");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    try {
+      const { authUrl } = await api.startOAuth(
+        serviceKey,
+        extras["client_id"],
+        extras["client_secret"]
+      );
+      const popup = window.open(authUrl, "oauth-popup", "width=500,height=700");
+
+      const handler = (event: MessageEvent) => {
+        if (event.data?.type === "oauth-success") {
+          window.removeEventListener("message", handler);
+          popup?.close();
+          setShowForm(false);
+          setExtras({});
+          onUpdate();
+        }
+      };
+      window.addEventListener("message", handler);
+
+      // Poll for popup close as fallback
+      const interval = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(interval);
+          window.removeEventListener("message", handler);
+          onUpdate();
+        }
+      }, 2000);
+      setTimeout(() => {
+        clearInterval(interval);
+        window.removeEventListener("message", handler);
+      }, 300_000);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleDisconnect() {
     setBusy(true);
     try {
@@ -422,13 +473,51 @@ function ServiceCard({
 
       {/* Connected state */}
       {status.connected && (
-        <button
-          onClick={handleDisconnect}
-          disabled={busy}
-          className="text-sm text-theme-secondary hover:text-red-400 transition"
-        >
-          Disconnect
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleDisconnect}
+            disabled={busy}
+            className="text-sm text-theme-secondary hover:text-red-400 transition"
+          >
+            Disconnect
+          </button>
+          {oauth && (
+            <button
+              onClick={async () => {
+                setBusy(true);
+                setError("");
+                try {
+                  const { authUrl } = await api.reauthOAuth(serviceKey);
+                  const popup = window.open(authUrl, "oauth-popup", "width=500,height=700");
+                  const handler = (event: MessageEvent) => {
+                    if (event.data?.type === "oauth-success") {
+                      window.removeEventListener("message", handler);
+                      popup?.close();
+                      onUpdate();
+                    }
+                  };
+                  window.addEventListener("message", handler);
+                  const interval = setInterval(() => {
+                    if (popup?.closed) {
+                      clearInterval(interval);
+                      window.removeEventListener("message", handler);
+                      onUpdate();
+                    }
+                  }, 2000);
+                  setTimeout(() => { clearInterval(interval); window.removeEventListener("message", handler); }, 300_000);
+                } catch (err: any) {
+                  setError(err.message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              disabled={busy}
+              className="text-sm text-blue-400 hover:text-blue-300 transition"
+            >
+              Re-authorize
+            </button>
+          )}
+        </div>
       )}
 
       {/* Disconnected state — PAT services */}
@@ -443,61 +532,139 @@ function ServiceCard({
             </button>
           ) : (
             <form onSubmit={handleConnect} className="space-y-2">
-              {extraFields?.map((field) => (
-                <input
-                  key={field.key}
-                  type="text"
-                  placeholder={field.placeholder}
-                  value={extras[field.key] ?? ""}
-                  onChange={(e) =>
-                    setExtras((prev) => ({
-                      ...prev,
-                      [field.key]: e.target.value,
-                    }))
-                  }
-                  className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
-                />
-              ))}
-              <input
-                type="password"
-                placeholder={tokenPlaceholder}
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
-              />
-              {authNote && (
-                <p className="text-xs text-yellow-400">{authNote}</p>
-              )}
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={busy || !token.trim()}
-                  className="flex-1 bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
-                >
-                  {busy ? "Validating..." : "Connect"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    setToken("");
-                    setExtras({});
-                    setError("");
-                  }}
-                  className="text-sm text-theme-secondary hover:text-theme-primary px-3"
-                >
-                  Cancel
-                </button>
-              </div>
-              {tokenUrl && (
-                <a
-                  href={tokenUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-xs text-accent-400 hover:underline"
-                >
-                  Get a token →
-                </a>
+              {/* OAuth services: show credential fields + sign-in button */}
+              {oauth && extraFields ? (
+                <>
+                  {extraFields.map((field) => (
+                    <input
+                      key={field.key}
+                      type={field.key.includes("secret") ? "password" : "text"}
+                      placeholder={field.placeholder}
+                      value={extras[field.key] ?? ""}
+                      onChange={(e) =>
+                        setExtras((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    onClick={handleOAuthStart}
+                    disabled={busy}
+                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 px-4 rounded-lg transition flex items-center justify-center gap-2"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+                    {busy ? "Opening..." : "Sign in with Google"}
+                  </button>
+
+                  {/* Manual token fallback */}
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowManualToken(!showManualToken)}
+                      className="text-xs text-theme-secondary hover:text-theme-primary transition"
+                    >
+                      {showManualToken ? "Hide manual entry" : "Or paste a refresh token manually"}
+                    </button>
+                  </div>
+                  {showManualToken && (
+                    <>
+                      <input
+                        type="password"
+                        placeholder={tokenPlaceholder}
+                        value={token}
+                        onChange={(e) => setToken(e.target.value)}
+                        className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                      />
+                      <button
+                        type="submit"
+                        disabled={busy || !token.trim()}
+                        className="w-full bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
+                      >
+                        {busy ? "Validating..." : "Connect with Token"}
+                      </button>
+                    </>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForm(false);
+                        setToken("");
+                        setExtras({});
+                        setError("");
+                        setShowManualToken(false);
+                      }}
+                      className="text-sm text-theme-secondary hover:text-theme-primary px-1"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Standard token flow */}
+                  {extraFields?.map((field) => (
+                    <input
+                      key={field.key}
+                      type="text"
+                      placeholder={field.placeholder}
+                      value={extras[field.key] ?? ""}
+                      onChange={(e) =>
+                        setExtras((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    />
+                  ))}
+                  <input
+                    type="password"
+                    placeholder={tokenPlaceholder}
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                  />
+                  {authNote && (
+                    <p className="text-xs text-yellow-400">{authNote}</p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={busy || !token.trim()}
+                      className="flex-1 bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
+                    >
+                      {busy ? "Validating..." : "Connect"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForm(false);
+                        setToken("");
+                        setExtras({});
+                        setError("");
+                      }}
+                      className="text-sm text-theme-secondary hover:text-theme-primary px-3"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {tokenUrl && (
+                    <a
+                      href={tokenUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-xs text-accent-400 hover:underline"
+                    >
+                      Get a token →
+                    </a>
+                  )}
+                </>
               )}
             </form>
           )}

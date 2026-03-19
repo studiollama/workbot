@@ -27,6 +27,13 @@ export function loadStore(): Record<string, StoredService> {
   }
 }
 
+export interface OAuthConfig {
+  authUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  redirectPath: string;
+}
+
 export interface ServiceConfig {
   name: string;
   validateUrl: string | ((extras: Record<string, string>) => string);
@@ -45,6 +52,7 @@ export interface ServiceConfig {
     token: string,
     extras: Record<string, string>
   ) => Promise<{ resolvedToken: string }>;
+  oauth?: OAuthConfig;
 }
 
 // Azure AD client credentials → bearer token exchange
@@ -448,9 +456,52 @@ export const SERVICES: Record<string, ServiceConfig> = {
     extractUser: (data) => data.emailAddress ?? "Connected",
     tokenUrl: "https://developers.google.com/oauthplayground/",
     tokenPrefix: "",
+    tokenLabel: "Refresh Token",
     authNote:
-      "OAuth token — expires after ~1 hour. Re-connect when expired.",
-    difficulty: "OAuth Token",
+      "Enter your OAuth credentials and click 'Sign in with Google', or paste a refresh token manually.",
+    difficulty: "OAuth + Credentials",
+    extraFields: [
+      {
+        key: "client_id",
+        label: "OAuth Client ID",
+        placeholder: "xxxxx.apps.googleusercontent.com",
+      },
+      {
+        key: "client_secret",
+        label: "OAuth Client Secret",
+        placeholder: "GOCSPX-xxxxx",
+      },
+    ],
+    oauth: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      scopes: [
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.compose",
+      ],
+      redirectPath: "/api/services/gmail/oauth/callback",
+    },
+    preConnect: async (refreshToken, extras) => {
+      const res = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: extras.client_id,
+          client_secret: extras.client_secret,
+          refresh_token: refreshToken,
+        }).toString(),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(
+          `Gmail token refresh failed (${res.status}): ${text.slice(0, 200)}`
+        );
+      }
+      const data = await res.json();
+      return { resolvedToken: data.access_token };
+    },
   },
   googleadmin: {
     name: "Google Admin Console",
@@ -529,6 +580,23 @@ export const SERVICES: Record<string, ServiceConfig> = {
     },
     tokenUrl: "https://render.com/docs/api#creating-an-api-key",
     tokenPrefix: "rnd_",
+    difficulty: "API Key",
+  },
+  stripe: {
+    name: "Stripe",
+    validateUrl: "https://api.stripe.com/v1/balance",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => {
+      const available = data.available ?? [];
+      if (available.length > 0) {
+        const cur = available[0].currency?.toUpperCase() ?? "";
+        const amt = (available[0].amount / 100).toFixed(2);
+        return `${cur} ${amt} available`;
+      }
+      return "Connected";
+    },
+    tokenUrl: "https://dashboard.stripe.com/apikeys",
+    tokenPrefix: "sk_",
     difficulty: "API Key",
   },
   supabase: {

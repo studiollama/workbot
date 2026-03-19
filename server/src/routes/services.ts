@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { randomUUID } from "crypto";
 import {
   SERVICES,
   loadStore,
@@ -8,8 +9,15 @@ import {
   STORE_PATH,
   type StoredService,
 } from "../services.js";
+import { loadMcpConfig } from "../mcp-config.js";
 
 const router = Router();
+
+// In-memory store for pending OAuth flows (state → credentials)
+const pendingOAuth = new Map<
+  string,
+  { service: string; clientId: string; clientSecret: string; redirectUri: string }
+>();
 
 function saveStore(data: Record<string, StoredService>) {
   if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
@@ -148,6 +156,198 @@ router.post("/:service/disconnect", (req, res) => {
   res.json({ disconnected: true });
 });
 
+// POST /api/services/:service/oauth/start — initiate OAuth flow
+router.post("/:service/oauth/start", (req, res) => {
+  const { service } = req.params;
+  const config = SERVICES[service];
+  if (!config?.oauth) {
+    return res.status(400).json({ error: `Service "${service}" does not support OAuth.` });
+  }
+
+  const { client_id, client_secret } = req.body;
+  if (!client_id || !client_secret) {
+    return res.status(400).json({ error: "client_id and client_secret are required." });
+  }
+
+  const state = randomUUID();
+  const port = loadMcpConfig().serverPort;
+  const redirectUri = `http://localhost:${port}${config.oauth.redirectPath}`;
+
+  pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri });
+  // Auto-expire after 10 minutes
+  setTimeout(() => pendingOAuth.delete(state), 600_000);
+
+  const params = new URLSearchParams({
+    client_id,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: config.oauth.scopes.join(" "),
+    access_type: "offline",
+    prompt: "consent",
+    state,
+  });
+
+  res.json({ authUrl: `${config.oauth.authUrl}?${params.toString()}` });
+});
+
+// POST /api/services/:service/oauth/reauth — re-authorize using stored credentials
+router.post("/:service/oauth/reauth", (req, res) => {
+  const { service } = req.params;
+  const config = SERVICES[service];
+  if (!config?.oauth) {
+    return res.status(400).json({ error: `Service "${service}" does not support OAuth.` });
+  }
+
+  const store = loadStore();
+  const saved = store[service];
+  if (!saved?.extras?.client_id || !saved?.extras?.client_secret) {
+    return res.status(400).json({ error: "No stored OAuth credentials. Connect manually first." });
+  }
+
+  const state = randomUUID();
+  const port = loadMcpConfig().serverPort;
+  const redirectUri = `http://localhost:${port}${config.oauth.redirectPath}`;
+
+  pendingOAuth.set(state, {
+    service,
+    clientId: saved.extras.client_id,
+    clientSecret: saved.extras.client_secret,
+    redirectUri,
+  });
+  setTimeout(() => pendingOAuth.delete(state), 600_000);
+
+  const params = new URLSearchParams({
+    client_id: saved.extras.client_id,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: config.oauth.scopes.join(" "),
+    access_type: "offline",
+    prompt: "consent",
+    state,
+  });
+
+  res.json({ authUrl: `${config.oauth.authUrl}?${params.toString()}` });
+});
+
+// GET /api/services/:service/oauth/callback — Google redirects here
+router.get("/:service/oauth/callback", async (req, res) => {
+  const { code, state, error: oauthError } = req.query;
+
+  if (oauthError) {
+    return res.send(oauthResultPage(false, `Authorization denied: ${oauthError}`));
+  }
+
+  if (!state || !code) {
+    return res.send(oauthResultPage(false, "Missing authorization code or state."));
+  }
+
+  const pending = pendingOAuth.get(state as string);
+  if (!pending) {
+    return res.send(oauthResultPage(false, "OAuth session expired. Please try again from the dashboard."));
+  }
+  pendingOAuth.delete(state as string);
+
+  const { service } = req.params;
+  const config = SERVICES[service];
+  if (!config?.oauth) {
+    return res.send(oauthResultPage(false, `Service "${service}" does not support OAuth.`));
+  }
+
+  try {
+    // Exchange authorization code for tokens
+    const tokenRes = await fetch(config.oauth.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: code as string,
+        client_id: pending.clientId,
+        client_secret: pending.clientSecret,
+        redirect_uri: pending.redirectUri,
+        grant_type: "authorization_code",
+      }).toString(),
+    });
+
+    if (!tokenRes.ok) {
+      const text = await tokenRes.text();
+      return res.send(oauthResultPage(false, `Token exchange failed: ${text.slice(0, 200)}`));
+    }
+
+    const tokenData = await tokenRes.json();
+    const refreshToken = tokenData.refresh_token;
+    const accessToken = tokenData.access_token;
+
+    if (!refreshToken) {
+      return res.send(oauthResultPage(false, "No refresh token returned. Revoke access at myaccount.google.com/permissions and try again."));
+    }
+
+    // Validate by calling the service's validation endpoint
+    const validateUrl =
+      typeof config.validateUrl === "function"
+        ? config.validateUrl({})
+        : config.validateUrl;
+
+    const validateRes = await fetch(validateUrl, {
+      headers: config.authHeader(accessToken),
+    });
+
+    if (!validateRes.ok) {
+      return res.send(oauthResultPage(false, "Token works but validation failed. Check API scopes."));
+    }
+
+    const userData = await validateRes.json();
+    const user = config.extractUser(userData);
+
+    // Persist refresh token + client credentials
+    const store = loadStore();
+    store[service] = {
+      token: refreshToken,
+      user,
+      extras: {
+        client_id: pending.clientId,
+        client_secret: pending.clientSecret,
+      },
+    };
+    saveStore(store);
+
+    return res.send(oauthResultPage(true, user));
+  } catch (err: any) {
+    return res.send(oauthResultPage(false, err.message));
+  }
+});
+
+function oauthResultPage(success: boolean, detail: string): string {
+  const icon = success ? "&#10003;" : "&#10007;";
+  const color = success ? "#22c55e" : "#ef4444";
+  const title = success ? "Connected!" : "Connection Failed";
+  const subtitle = success ? `Signed in as ${detail}` : detail;
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>OAuth - ${title}</title>
+<style>
+  body { margin:0; display:flex; align-items:center; justify-content:center; min-height:100vh;
+    background:#0f0f0f; font-family:-apple-system,Arial,sans-serif; color:#e5e5e5; }
+  .card { text-align:center; padding:48px; }
+  .icon { font-size:48px; color:${color}; margin-bottom:16px; }
+  h1 { font-size:24px; margin:0 0 8px; color:${color}; }
+  p { font-size:14px; color:#999; margin:0 0 24px; max-width:360px; word-break:break-word; }
+  button { background:#333; color:#fff; border:none; padding:10px 24px; border-radius:8px;
+    cursor:pointer; font-size:14px; }
+  button:hover { background:#444; }
+</style></head>
+<body>
+  <div class="card">
+    <div class="icon">${icon}</div>
+    <h1>${title}</h1>
+    <p>${subtitle}</p>
+    <button onclick="window.close()">Close</button>
+  </div>
+  <script>
+    ${success ? `window.opener?.postMessage({ type: "oauth-success" }, "*");` : ""}
+    ${success ? "setTimeout(() => window.close(), 2000);" : ""}
+  </script>
+</body></html>`;
+}
+
 // GET /api/services/config — returns token URLs and display info (no secrets)
 router.get("/config", (_req, res) => {
   const config: Record<
@@ -160,6 +360,7 @@ router.get("/config", (_req, res) => {
       tokenLabel?: string;
       authNote?: string;
       difficulty?: string;
+      oauth?: { scopes: string[]; redirectPath: string };
     }
   > = {};
   for (const [key, svc] of Object.entries(SERVICES)) {
@@ -171,6 +372,7 @@ router.get("/config", (_req, res) => {
       ...(svc.tokenLabel ? { tokenLabel: svc.tokenLabel } : {}),
       ...(svc.authNote ? { authNote: svc.authNote } : {}),
       ...(svc.difficulty ? { difficulty: svc.difficulty } : {}),
+      ...(svc.oauth ? { oauth: { scopes: svc.oauth.scopes, redirectPath: svc.oauth.redirectPath } } : {}),
     };
   }
   config.codex = {

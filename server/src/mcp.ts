@@ -35,9 +35,10 @@ async function runQmd(args: string[]): Promise<string> {
     // Normalize backslashes to forward slashes — Windows JSON may store C:\\...
     const nodePath = mcpConfig.nodePath.replace(/\\/g, "/");
     const qmdPath = mcpConfig.qmdCliPath!.replace(/\\/g, "/");
+    const indexArgs = mcpConfig.qmdIndex ? ["--index", mcpConfig.qmdIndex] : [];
     const { stdout, stderr } = await execFileAsync(
       nodePath,
-      [qmdPath, ...args],
+      [qmdPath, ...indexArgs, ...args],
       {
         timeout: 30_000,
         maxBuffer: 1024 * 1024,
