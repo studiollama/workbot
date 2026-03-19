@@ -51,9 +51,10 @@ router.get("/status", async (_req, res) => {
   try {
     const nodePath = config.nodePath.replace(/\\/g, "/");
     const qmdPath = config.qmdCliPath!.replace(/\\/g, "/");
+    const indexArgs = config.qmdIndex ? ["--index", config.qmdIndex] : [];
     const { stdout } = await execFileAsync(
       nodePath,
-      [qmdPath, "status"],
+      [qmdPath, ...indexArgs, "status"],
       { timeout: 10_000 }
     );
     res.json({ qmdAvailable: true, details: stdout.trim() });

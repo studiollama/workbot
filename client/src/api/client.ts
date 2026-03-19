@@ -26,6 +26,7 @@ export interface ServiceConfig {
   tokenLabel?: string;
   authNote?: string;
   difficulty?: string;
+  oauth?: { scopes: string[]; redirectPath: string };
 }
 
 export interface DashboardConfig {
@@ -153,6 +154,17 @@ export const api = {
 
   disconnectService: (service: string) =>
     request<{ disconnected: boolean }>(`/services/${service}/disconnect`, {
+      method: "POST",
+    }),
+
+  startOAuth: (service: string, clientId: string, clientSecret: string) =>
+    request<{ authUrl: string }>(`/services/${service}/oauth/start`, {
+      method: "POST",
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+    }),
+
+  reauthOAuth: (service: string) =>
+    request<{ authUrl: string }>(`/services/${service}/oauth/reauth`, {
       method: "POST",
     }),
 

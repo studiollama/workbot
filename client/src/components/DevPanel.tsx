@@ -65,22 +65,19 @@ export default function DevPanel() {
     return () => clearInterval(pollRef.current);
   }, []);
 
-  // Poll while cloning or analyzing
+  // Poll while cloning
   useEffect(() => {
-    if (
-      status?.cloneStatus === "cloning" ||
-      status?.analysisStatus === "running"
-    ) {
+    if (status?.cloneStatus === "cloning") {
       pollRef.current = setInterval(async () => {
         const s = await fetchStatus();
-        if (s?.cloneStatus === "cloned" && s?.analysisStatus !== "running") {
+        if (s?.cloneStatus === "cloned") {
           clearInterval(pollRef.current);
           await fetchRepoData();
         }
       }, 3000);
       return () => clearInterval(pollRef.current);
     }
-  }, [status?.cloneStatus, status?.analysisStatus]);
+  }, [status?.cloneStatus]);
 
   async function handleSetRepo() {
     if (!repoInput.trim()) return;
@@ -111,16 +108,6 @@ export default function DevPanel() {
       setIssues([]);
       setPulls([]);
       setEnvFiles([]);
-      await fetchStatus();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
-  async function handleAnalyze() {
-    setError("");
-    try {
-      await api.startAnalysis();
       await fetchStatus();
     } catch (err: any) {
       setError(err.message);
@@ -367,45 +354,6 @@ export default function DevPanel() {
       {/* Env manager */}
       <EnvManager envFiles={envFiles} onRefresh={fetchRepoData} />
 
-      {/* Analysis card */}
-      <div className="bg-surface-card rounded-xl p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h4 className="text-sm font-medium">Brain Assimilation</h4>
-            <p className="text-xs text-theme-secondary">
-              Analyze this codebase and index findings into the workbot brain
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {status.analysisStatus === "running" && (
-              <span className="flex items-center gap-2 text-xs text-theme-secondary">
-                <span className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
-                Analyzing...
-              </span>
-            )}
-            {status.analysisStatus === "done" && (
-              <span className="text-xs text-green-400">Complete</span>
-            )}
-            {status.analysisStatus === "error" && (
-              <span className="text-xs text-red-400" title={status.analysisError ?? ""}>
-                Failed
-              </span>
-            )}
-            <button
-              onClick={handleAnalyze}
-              disabled={status.analysisStatus === "running"}
-              className="bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-xs font-medium py-1.5 px-3 rounded-lg transition"
-            >
-              {status.analysisStatus === "running" ? "Running..." : "Analyze"}
-            </button>
-          </div>
-        </div>
-        {status.analysisStatus === "error" && status.analysisError && (
-          <div className="bg-red-900/50 border border-red-700 rounded-lg p-2 text-red-300 text-xs">
-            {status.analysisError}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
