@@ -372,10 +372,12 @@ function ServiceCard({
     setError("");
     setBusy(true);
     try {
+      const { client_id, client_secret, ...otherExtras } = extras;
       const { authUrl } = await api.startOAuth(
         serviceKey,
-        extras["client_id"],
-        extras["client_secret"]
+        client_id,
+        client_secret,
+        otherExtras
       );
       const popup = window.open(authUrl, "oauth-popup", "width=500,height=700");
 

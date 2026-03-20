@@ -2,6 +2,7 @@ import { Router } from "express";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { loadMcpConfig } from "../mcp-config.js";
 import {
   SERVICES,
   loadStore,
@@ -9,14 +10,22 @@ import {
   STORE_PATH,
   type StoredService,
 } from "../services.js";
-import { loadMcpConfig } from "../mcp-config.js";
+
 
 const router = Router();
+
+/** Build the OAuth redirect URI using the host-mapped port (for Docker). */
+function oauthRedirectUri(req: import("express").Request, path: string): string {
+  const mcpCfg = loadMcpConfig();
+  const hostPort = mcpCfg.hostServerPort || mcpCfg.serverPort;
+  const hostname = req.hostname.split(":")[0]; // strip port if present
+  return `${req.protocol}://${hostname}:${hostPort}${path}`;
+}
 
 // In-memory store for pending OAuth flows (state → credentials)
 const pendingOAuth = new Map<
   string,
-  { service: string; clientId: string; clientSecret: string; redirectUri: string }
+  { service: string; clientId: string; clientSecret: string; redirectUri: string; extras: Record<string, string> }
 >();
 
 function saveStore(data: Record<string, StoredService>) {
@@ -164,16 +173,16 @@ router.post("/:service/oauth/start", (req, res) => {
     return res.status(400).json({ error: `Service "${service}" does not support OAuth.` });
   }
 
-  const { client_id, client_secret } = req.body;
+  const { client_id, client_secret, ...extraBody } = req.body;
+  console.log(`[OAuth Start] ${service} extras:`, JSON.stringify(extraBody));
   if (!client_id || !client_secret) {
     return res.status(400).json({ error: "client_id and client_secret are required." });
   }
 
   const state = randomUUID();
-  const port = loadMcpConfig().serverPort;
-  const redirectUri = `http://localhost:${port}${config.oauth.redirectPath}`;
+  const redirectUri = oauthRedirectUri(req, config.oauth.redirectPath);
 
-  pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri });
+  pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri, extras: extraBody });
   // Auto-expire after 10 minutes
   setTimeout(() => pendingOAuth.delete(state), 600_000);
 
@@ -205,14 +214,14 @@ router.post("/:service/oauth/reauth", (req, res) => {
   }
 
   const state = randomUUID();
-  const port = loadMcpConfig().serverPort;
-  const redirectUri = `http://localhost:${port}${config.oauth.redirectPath}`;
+  const redirectUri = oauthRedirectUri(req, config.oauth.redirectPath);
 
   pendingOAuth.set(state, {
     service,
     clientId: saved.extras.client_id,
     clientSecret: saved.extras.client_secret,
     redirectUri,
+    extras: saved.extras,
   });
   setTimeout(() => pendingOAuth.delete(state), 600_000);
 
@@ -281,31 +290,30 @@ router.get("/:service/oauth/callback", async (req, res) => {
     }
 
     // Validate by calling the service's validation endpoint
+    const oauthExtras = { ...pending.extras, client_id: pending.clientId, client_secret: pending.clientSecret };
+    let user = "Connected";
+
     const validateUrl =
       typeof config.validateUrl === "function"
-        ? config.validateUrl({})
+        ? config.validateUrl(oauthExtras)
         : config.validateUrl;
 
     const validateRes = await fetch(validateUrl, {
-      headers: config.authHeader(accessToken),
+      headers: config.authHeader(accessToken, oauthExtras),
     });
 
-    if (!validateRes.ok) {
-      return res.send(oauthResultPage(false, "Token works but validation failed. Check API scopes."));
+    if (validateRes.ok) {
+      const userData = await validateRes.json();
+      user = config.extractUser(userData);
     }
+    // If validation fails, still save — OAuth worked, validation can happen on next connect
 
-    const userData = await validateRes.json();
-    const user = config.extractUser(userData);
-
-    // Persist refresh token + client credentials
+    // Persist refresh token + client credentials + extra fields
     const store = loadStore();
     store[service] = {
       token: refreshToken,
       user,
-      extras: {
-        client_id: pending.clientId,
-        client_secret: pending.clientSecret,
-      },
+      extras: oauthExtras,
     };
     saveStore(store);
 

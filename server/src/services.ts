@@ -215,16 +215,53 @@ export const SERVICES: Record<string, ServiceConfig> = {
     tokenUrl:
       "https://developers.google.com/google-ads/api/docs/get-started/oauth-cloud-project",
     tokenPrefix: "",
+    tokenLabel: "Refresh Token",
     authNote:
-      "OAuth token — expires after ~1 hour. Re-connect when expired.",
-    difficulty: "OAuth Token",
+      "Enter your OAuth credentials and click 'Sign in with Google', or paste a refresh token manually.",
+    difficulty: "OAuth + Credentials",
     extraFields: [
+      {
+        key: "client_id",
+        label: "OAuth Client ID",
+        placeholder: "xxxxx.apps.googleusercontent.com",
+      },
+      {
+        key: "client_secret",
+        label: "OAuth Client Secret",
+        placeholder: "GOCSPX-xxxxx",
+      },
       {
         key: "developerToken",
         label: "Developer Token",
         placeholder: "xxxxxxxxxxxxxxx",
       },
     ],
+    oauth: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      scopes: ["https://www.googleapis.com/auth/adwords"],
+      redirectPath: "/api/services/googleads/oauth/callback",
+    },
+    preConnect: async (refreshToken, extras) => {
+      const res = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: extras.client_id,
+          client_secret: extras.client_secret,
+          refresh_token: refreshToken,
+        }).toString(),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(
+          `Google Ads token refresh failed (${res.status}): ${text.slice(0, 200)}`
+        );
+      }
+      const data = await res.json();
+      return { resolvedToken: data.access_token };
+    },
   },
   entra: {
     name: "Entra (Azure AD)",

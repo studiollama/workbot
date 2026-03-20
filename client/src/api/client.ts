@@ -157,10 +157,10 @@ export const api = {
       method: "POST",
     }),
 
-  startOAuth: (service: string, clientId: string, clientSecret: string) =>
+  startOAuth: (service: string, clientId: string, clientSecret: string, extras?: Record<string, string>) =>
     request<{ authUrl: string }>(`/services/${service}/oauth/start`, {
       method: "POST",
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, ...extras }),
     }),
 
   reauthOAuth: (service: string) =>
