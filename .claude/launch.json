@@ -7,6 +7,13 @@
       "runtimeArgs": ["../node_modules/vite/bin/vite.js", "--port", "5173"],
       "port": 5173,
       "cwd": "client"
+    },
+    {
+      "name": "workbot-server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["../node_modules/tsx/dist/cli.mjs", "watch", "src/index.ts"],
+      "port": 3001,
+      "cwd": "server"
     }
   ]
 }
