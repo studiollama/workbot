@@ -153,3 +153,12 @@ QMD (`@tobilu/qmd`) indexes all brain markdown into SQLite with BM25 + vector se
 - Vite proxies `/api` → Express
 - Preview launch.json: use `node node_modules/vite/bin/vite.js` (npx broken on Windows)
 - Service tokens persist in `.workbot/services.json` (gitignored)
+
+## Docker Container Environment
+
+When running inside a Docker container:
+
+- **Internal ports are 3001 (server) and 5173 (client)** — Docker maps these to host ports. Never change `.workbot/mcp.json` ports from 3001/5173.
+- **Vite uses `host: "0.0.0.0"`** in vite.config.ts so Docker port forwarding works.
+- **npm install works normally** — `node_modules` is on a Linux-native volume with full symlink support.
+- **Do not modify `.workbot/mcp.json` ports** — the entrypoint resets them on container restart.

@@ -20,6 +20,7 @@ const { serverPort, clientPort } = loadPorts();
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: "0.0.0.0",
     port: clientPort,
     proxy: {
       "/api": `http://localhost:${serverPort}`,
