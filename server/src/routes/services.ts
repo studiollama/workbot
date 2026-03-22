@@ -170,7 +170,9 @@ router.post("/:service/oauth/start", (req, res) => {
   }
 
   const state = randomUUID();
-  const host = req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
+  // Derive redirect host from the browser's origin (handles Docker port mapping)
+  const origin = req.headers.origin || req.headers.referer;
+  const host = origin ? new URL(origin).host : req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
   const redirectUri = `http://${host}${config.oauth.redirectPath}`;
 
   pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri });
@@ -205,7 +207,9 @@ router.post("/:service/oauth/reauth", (req, res) => {
   }
 
   const state = randomUUID();
-  const host = req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
+  // Derive redirect host from the browser's origin (handles Docker port mapping)
+  const origin = req.headers.origin || req.headers.referer;
+  const host = origin ? new URL(origin).host : req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
   const redirectUri = `http://${host}${config.oauth.redirectPath}`;
 
   pendingOAuth.set(state, {
