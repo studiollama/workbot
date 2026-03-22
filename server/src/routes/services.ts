@@ -170,8 +170,8 @@ router.post("/:service/oauth/start", (req, res) => {
   }
 
   const state = randomUUID();
-  const port = loadMcpConfig().serverPort;
-  const redirectUri = `http://localhost:${port}${config.oauth.redirectPath}`;
+  const host = req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
+  const redirectUri = `http://${host}${config.oauth.redirectPath}`;
 
   pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri });
   // Auto-expire after 10 minutes
@@ -205,8 +205,8 @@ router.post("/:service/oauth/reauth", (req, res) => {
   }
 
   const state = randomUUID();
-  const port = loadMcpConfig().serverPort;
-  const redirectUri = `http://localhost:${port}${config.oauth.redirectPath}`;
+  const host = req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
+  const redirectUri = `http://${host}${config.oauth.redirectPath}`;
 
   pendingOAuth.set(state, {
     service,
