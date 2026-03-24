@@ -12,6 +12,8 @@ export interface McpConfig {
   claudeMdPath: string;
   serverPort: number;
   clientPort: number;
+  hostServerPort: number;
+  hostClientPort: number;
 }
 
 const DEFAULTS: McpConfig = {
@@ -22,6 +24,8 @@ const DEFAULTS: McpConfig = {
   claudeMdPath: "CLAUDE.md",
   serverPort: 3001,
   clientPort: 5173,
+  hostServerPort: 3001,
+  hostClientPort: 5173,
 };
 
 export function loadMcpConfig(): McpConfig {
@@ -36,6 +40,8 @@ export function loadMcpConfig(): McpConfig {
       claudeMdPath: typeof raw.claudeMdPath === "string" ? raw.claudeMdPath : DEFAULTS.claudeMdPath,
       serverPort: typeof raw.serverPort === "number" ? raw.serverPort : DEFAULTS.serverPort,
       clientPort: typeof raw.clientPort === "number" ? raw.clientPort : DEFAULTS.clientPort,
+      hostServerPort: typeof raw.hostServerPort === "number" ? raw.hostServerPort : DEFAULTS.hostServerPort,
+      hostClientPort: typeof raw.hostClientPort === "number" ? raw.hostClientPort : DEFAULTS.hostClientPort,
     };
   } catch {
     return { ...DEFAULTS };

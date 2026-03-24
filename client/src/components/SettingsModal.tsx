@@ -16,6 +16,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [claudeMdPath, setClaudeMdPath] = useState("CLAUDE.md");
   const [serverPort, setServerPort] = useState(3001);
   const [clientPort, setClientPort] = useState(5173);
+  const [hostServerPort, setHostServerPort] = useState<number | null>(null);
+  const [hostClientPort, setHostClientPort] = useState<number | null>(null);
   const [savedField, setSavedField] = useState<string | null>(null);
   const [restarting, setRestarting] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -32,6 +34,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         setClaudeMdPath(info.config.claudeMdPath || "CLAUDE.md");
         setServerPort(info.config.serverPort || 3001);
         setClientPort(info.config.clientPort || 5173);
+        setHostServerPort(info.config.hostServerPort || null);
+        setHostClientPort(info.config.hostClientPort || null);
       }).catch(() => {});
     }
   }, [open, workbotName, accentColor]);
@@ -283,6 +287,38 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 <span className="text-xs text-green-400">Saved — restart servers to apply</span>
               )}
             </div>
+
+            {/* Host-mapped ports (read-only) */}
+            {(hostServerPort || hostClientPort) && (
+              <div className="pt-2 space-y-2">
+                <p className="text-xs text-theme-secondary uppercase tracking-wider">
+                  Host Ports (Docker)
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-theme-secondary">Server (Host)</label>
+                    <input
+                      type="number"
+                      value={hostServerPort ?? ""}
+                      readOnly
+                      className="w-full bg-surface-input/50 border border-theme-input rounded-lg px-3 py-2 text-sm font-mono text-theme-secondary cursor-default"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-theme-secondary">Client (Host)</label>
+                    <input
+                      type="number"
+                      value={hostClientPort ?? ""}
+                      readOnly
+                      className="w-full bg-surface-input/50 border border-theme-input rounded-lg px-3 py-2 text-sm font-mono text-theme-secondary cursor-default"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-theme-secondary">
+                  External ports mapped by Docker. OAuth callbacks use the host server port.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
