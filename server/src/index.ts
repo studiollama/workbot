@@ -14,7 +14,7 @@ import servicesRoutes from "./routes/services.js";
 import mcpRoutes from "./routes/mcp.js";
 import devRoutes from "./routes/development.js";
 import skillsRoutes from "./routes/skills.js";
-import { loadMcpConfig } from "./mcp-config.js";
+import { loadMcpConfig, saveMcpConfig } from "./mcp-config.js";
 
 // Bootstrap gitignored config files with defaults for fresh clones
 function ensureDefaults() {
@@ -88,5 +88,13 @@ app.use("/api/skills", skillsRoutes);
 
 const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+
+  // Sync actual running port back to mcp.json so Settings UI, Vite proxy,
+  // and OAuth redirect URLs all use the correct port.
+  if (PORT !== mcpConfig.serverPort) {
+    saveMcpConfig({ serverPort: PORT });
+    console.log(`Updated mcp.json serverPort: ${mcpConfig.serverPort} → ${PORT}`);
+  }
 });
 app.set("server", server);
+app.set("actualPort", PORT);

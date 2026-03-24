@@ -154,6 +154,7 @@ QMD (`@tobilu/qmd`) indexes all brain markdown into SQLite with BM25 + vector se
 - Preview launch.json: use `node node_modules/vite/bin/vite.js` (npx broken on Windows)
 - Service tokens persist in `.workbot/services.json` (gitignored)
 
+
 ## Docker Container Environment
 
 When running inside a Docker container:

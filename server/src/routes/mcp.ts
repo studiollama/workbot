@@ -9,8 +9,13 @@ const router = Router();
 const execFileAsync = promisify(execFile);
 
 // GET /api/mcp/config — returns MCP config + tool list
-router.get("/config", (_req, res) => {
+router.get("/config", (req, res) => {
   const config = loadMcpConfig();
+  // Override with actual running port (may differ from file if PORT env was used)
+  const actualPort = req.app.get("actualPort");
+  if (typeof actualPort === "number") {
+    config.serverPort = actualPort;
+  }
   res.json({ config, tools: MCP_TOOLS });
 });
 

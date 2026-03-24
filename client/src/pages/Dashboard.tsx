@@ -279,7 +279,7 @@ function ServiceCard({
   onUpdate: () => Promise<void>;
 }) {
   const [token, setToken] = useState("");
-  const [extras, setExtras] = useState<Record<string, string>>({});
+  const [extras, setExtras] = useState<Record<string, string>>(status.extras ?? {});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -372,11 +372,7 @@ function ServiceCard({
     setError("");
     setBusy(true);
     try {
-      const { authUrl } = await api.startOAuth(
-        serviceKey,
-        extras["client_id"],
-        extras["client_secret"]
-      );
+      const { authUrl } = await api.startOAuth(serviceKey, extras);
       const popup = window.open(authUrl, "oauth-popup", "width=500,height=700");
 
       const handler = (event: MessageEvent) => {
@@ -536,19 +532,21 @@ function ServiceCard({
               {oauth && extraFields ? (
                 <>
                   {extraFields.map((field) => (
-                    <input
-                      key={field.key}
-                      type={field.key.includes("secret") ? "password" : "text"}
-                      placeholder={field.placeholder}
-                      value={extras[field.key] ?? ""}
-                      onChange={(e) =>
-                        setExtras((prev) => ({
-                          ...prev,
-                          [field.key]: e.target.value,
-                        }))
-                      }
-                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
-                    />
+                    <div key={field.key} className="space-y-1">
+                      <label className="text-xs text-theme-secondary">{field.label}</label>
+                      <input
+                        type={field.key.includes("secret") ? "password" : "text"}
+                        placeholder={field.placeholder}
+                        value={extras[field.key] ?? ""}
+                        onChange={(e) =>
+                          setExtras((prev) => ({
+                            ...prev,
+                            [field.key]: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                      />
+                    </div>
                   ))}
                   <button
                     type="button"

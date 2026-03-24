@@ -16,7 +16,7 @@ const router = Router();
 // In-memory store for pending OAuth flows (state → credentials)
 const pendingOAuth = new Map<
   string,
-  { service: string; clientId: string; clientSecret: string; redirectUri: string }
+  { service: string; clientId: string; clientSecret: string; redirectUri: string; extras?: Record<string, string> }
 >();
 
 function saveStore(data: Record<string, StoredService>) {
@@ -50,13 +50,22 @@ function saveDashboardConfig(config: DashboardConfig) {
 // GET /api/services/status
 router.get("/status", (_req, res) => {
   const store = loadStore();
-  const result: Record<string, { connected: boolean; user?: string }> = {};
+  const result: Record<string, { connected: boolean; user?: string; extras?: Record<string, string> }> = {};
 
   for (const key of Object.keys(SERVICES)) {
     const saved = store[key];
-    result[key] = saved
-      ? { connected: true, user: saved.user }
-      : { connected: false };
+    if (saved) {
+      // Return non-secret extras so the form can pre-populate (mask secrets)
+      const safeExtras: Record<string, string> = {};
+      if (saved.extras) {
+        for (const [k, v] of Object.entries(saved.extras)) {
+          safeExtras[k] = k.includes("secret") ? "" : v;
+        }
+      }
+      result[key] = { connected: true, user: saved.user, ...(Object.keys(safeExtras).length > 0 ? { extras: safeExtras } : {}) };
+    } else {
+      result[key] = { connected: false };
+    }
   }
 
   // Codex (ChatGPT) — check for auth file (optional service)
@@ -164,10 +173,22 @@ router.post("/:service/oauth/start", (req, res) => {
     return res.status(400).json({ error: `Service "${service}" does not support OAuth.` });
   }
 
-  const { client_id, client_secret } = req.body;
+  const { client_id, client_secret, ...oauthExtras } = req.body;
+  console.log(`[OAuth start] ${service} body keys:`, Object.keys(req.body), 'oauthExtras:', Object.keys(oauthExtras));
   if (!client_id || !client_secret) {
     return res.status(400).json({ error: "client_id and client_secret are required." });
   }
+
+  // Collect any additional extra fields (e.g. developerToken for Google Ads)
+  const extraFields: Record<string, string> = {};
+  if (config.extraFields) {
+    for (const field of config.extraFields) {
+      if (field.key !== "client_id" && field.key !== "client_secret" && oauthExtras[field.key]) {
+        extraFields[field.key] = oauthExtras[field.key];
+      }
+    }
+  }
+  console.log(`[OAuth start] ${service} extraFields:`, extraFields);
 
   const state = randomUUID();
   // Derive redirect host from the browser's origin (handles Docker port mapping)
@@ -175,7 +196,7 @@ router.post("/:service/oauth/start", (req, res) => {
   const host = origin ? new URL(origin).host : req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
   const redirectUri = `http://${host}${config.oauth.redirectPath}`;
 
-  pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri });
+  pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri, ...(Object.keys(extraFields).length > 0 ? { extras: extraFields } : {}) });
   // Auto-expire after 10 minutes
   setTimeout(() => pendingOAuth.delete(state), 600_000);
 
@@ -212,11 +233,22 @@ router.post("/:service/oauth/reauth", (req, res) => {
   const host = origin ? new URL(origin).host : req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
   const redirectUri = `http://${host}${config.oauth.redirectPath}`;
 
+  // Carry forward any service-specific extras (e.g. developerToken)
+  const savedExtras: Record<string, string> = {};
+  if (config.extraFields) {
+    for (const field of config.extraFields) {
+      if (field.key !== "client_id" && field.key !== "client_secret" && saved.extras[field.key]) {
+        savedExtras[field.key] = saved.extras[field.key];
+      }
+    }
+  }
+
   pendingOAuth.set(state, {
     service,
     clientId: saved.extras.client_id,
     clientSecret: saved.extras.client_secret,
     redirectUri,
+    ...(Object.keys(savedExtras).length > 0 ? { extras: savedExtras } : {}),
   });
   setTimeout(() => pendingOAuth.delete(state), 600_000);
 
@@ -285,23 +317,29 @@ router.get("/:service/oauth/callback", async (req, res) => {
     }
 
     // Validate by calling the service's validation endpoint
+    // Include any service-specific extras (e.g. developerToken for Google Ads)
+    const allExtras = { client_id: pending.clientId, client_secret: pending.clientSecret, ...(pending.extras ?? {}) };
     const validateUrl =
       typeof config.validateUrl === "function"
-        ? config.validateUrl({})
+        ? config.validateUrl(allExtras)
         : config.validateUrl;
 
+    let user = "Connected";
     const validateRes = await fetch(validateUrl, {
-      headers: config.authHeader(accessToken),
+      headers: config.authHeader(accessToken, allExtras),
     });
 
-    if (!validateRes.ok) {
-      return res.send(oauthResultPage(false, "Token works but validation failed. Check API scopes."));
+    if (validateRes.ok) {
+      const userData = await validateRes.json();
+      user = config.extractUser(userData);
+    } else {
+      // OAuth token exchange succeeded, so credentials are valid.
+      // Validation may fail for API-version or access-level reasons (e.g. Google Ads basic access).
+      // Store credentials anyway — preConnect will handle token refresh on actual API calls.
+      console.warn(`[OAuth callback] ${service} validation failed (${validateRes.status}), storing credentials anyway`);
     }
 
-    const userData = await validateRes.json();
-    const user = config.extractUser(userData);
-
-    // Persist refresh token + client credentials
+    // Persist refresh token + client credentials + any service-specific extras
     const store = loadStore();
     store[service] = {
       token: refreshToken,
@@ -309,6 +347,7 @@ router.get("/:service/oauth/callback", async (req, res) => {
       extras: {
         client_id: pending.clientId,
         client_secret: pending.clientSecret,
+        ...(pending.extras ?? {}),
       },
     };
     saveStore(store);

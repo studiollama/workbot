@@ -16,6 +16,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export interface ServiceStatus {
   connected: boolean;
   user?: string;
+  extras?: Record<string, string>;
 }
 
 export interface ServiceConfig {
@@ -157,10 +158,10 @@ export const api = {
       method: "POST",
     }),
 
-  startOAuth: (service: string, clientId: string, clientSecret: string) =>
+  startOAuth: (service: string, allExtras: Record<string, string>) =>
     request<{ authUrl: string }>(`/services/${service}/oauth/start`, {
       method: "POST",
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+      body: JSON.stringify(allExtras),
     }),
 
   reauthOAuth: (service: string) =>
