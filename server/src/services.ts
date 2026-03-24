@@ -201,7 +201,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
   googleads: {
     name: "Google Ads",
     validateUrl:
-      "https://googleads.googleapis.com/v17/customers:listAccessibleCustomers",
+      "https://googleads.googleapis.com/v20/customers:listAccessibleCustomers",
     authHeader: (token, extras) => ({
       Authorization: `Bearer ${token}`,
       "developer-token": extras?.developerToken ?? "",
@@ -221,6 +221,11 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "OAuth + Credentials",
     extraFields: [
       {
+        key: "developerToken",
+        label: "Developer Token",
+        placeholder: "xxxxxxxxxxxxxxx",
+      },
+      {
         key: "client_id",
         label: "OAuth Client ID",
         placeholder: "xxxxx.apps.googleusercontent.com",
@@ -229,11 +234,6 @@ export const SERVICES: Record<string, ServiceConfig> = {
         key: "client_secret",
         label: "OAuth Client Secret",
         placeholder: "GOCSPX-xxxxx",
-      },
-      {
-        key: "developerToken",
-        label: "Developer Token",
-        placeholder: "xxxxxxxxxxxxxxx",
       },
     ],
     oauth: {
@@ -516,6 +516,9 @@ export const SERVICES: Record<string, ServiceConfig> = {
         "https://www.googleapis.com/auth/gmail.send",
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.settings.basic",
+        "https://www.googleapis.com/auth/gmail.labels",
       ],
       redirectPath: "/api/services/gmail/oauth/callback",
     },

@@ -2,7 +2,6 @@ import { Router } from "express";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { loadMcpConfig } from "../mcp-config.js";
 import {
   SERVICES,
   loadStore,
@@ -10,22 +9,14 @@ import {
   STORE_PATH,
   type StoredService,
 } from "../services.js";
-
+import { loadMcpConfig } from "../mcp-config.js";
 
 const router = Router();
-
-/** Build the OAuth redirect URI using the host-mapped port (for Docker). */
-function oauthRedirectUri(req: import("express").Request, path: string): string {
-  const mcpCfg = loadMcpConfig();
-  const hostPort = mcpCfg.hostServerPort || mcpCfg.serverPort;
-  const hostname = req.hostname.split(":")[0]; // strip port if present
-  return `${req.protocol}://${hostname}:${hostPort}${path}`;
-}
 
 // In-memory store for pending OAuth flows (state → credentials)
 const pendingOAuth = new Map<
   string,
-  { service: string; clientId: string; clientSecret: string; redirectUri: string; extras: Record<string, string> }
+  { service: string; clientId: string; clientSecret: string; redirectUri: string; extras?: Record<string, string> }
 >();
 
 function saveStore(data: Record<string, StoredService>) {
@@ -59,13 +50,22 @@ function saveDashboardConfig(config: DashboardConfig) {
 // GET /api/services/status
 router.get("/status", (_req, res) => {
   const store = loadStore();
-  const result: Record<string, { connected: boolean; user?: string }> = {};
+  const result: Record<string, { connected: boolean; user?: string; extras?: Record<string, string> }> = {};
 
   for (const key of Object.keys(SERVICES)) {
     const saved = store[key];
-    result[key] = saved
-      ? { connected: true, user: saved.user }
-      : { connected: false };
+    if (saved) {
+      // Return non-secret extras so the form can pre-populate (mask secrets)
+      const safeExtras: Record<string, string> = {};
+      if (saved.extras) {
+        for (const [k, v] of Object.entries(saved.extras)) {
+          safeExtras[k] = k.includes("secret") ? "" : v;
+        }
+      }
+      result[key] = { connected: true, user: saved.user, ...(Object.keys(safeExtras).length > 0 ? { extras: safeExtras } : {}) };
+    } else {
+      result[key] = { connected: false };
+    }
   }
 
   // Codex (ChatGPT) — check for auth file (optional service)
@@ -173,16 +173,30 @@ router.post("/:service/oauth/start", (req, res) => {
     return res.status(400).json({ error: `Service "${service}" does not support OAuth.` });
   }
 
-  const { client_id, client_secret, ...extraBody } = req.body;
-  console.log(`[OAuth Start] ${service} extras:`, JSON.stringify(extraBody));
+  const { client_id, client_secret, ...oauthExtras } = req.body;
+  console.log(`[OAuth start] ${service} body keys:`, Object.keys(req.body), 'oauthExtras:', Object.keys(oauthExtras));
   if (!client_id || !client_secret) {
     return res.status(400).json({ error: "client_id and client_secret are required." });
   }
 
-  const state = randomUUID();
-  const redirectUri = oauthRedirectUri(req, config.oauth.redirectPath);
+  // Collect any additional extra fields (e.g. developerToken for Google Ads)
+  const extraFields: Record<string, string> = {};
+  if (config.extraFields) {
+    for (const field of config.extraFields) {
+      if (field.key !== "client_id" && field.key !== "client_secret" && oauthExtras[field.key]) {
+        extraFields[field.key] = oauthExtras[field.key];
+      }
+    }
+  }
+  console.log(`[OAuth start] ${service} extraFields:`, extraFields);
 
-  pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri, extras: extraBody });
+  const state = randomUUID();
+  // Derive redirect host from the browser's origin (handles Docker port mapping)
+  const origin = req.headers.origin || req.headers.referer;
+  const host = origin ? new URL(origin).host : req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
+  const redirectUri = `http://${host}${config.oauth.redirectPath}`;
+
+  pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri, ...(Object.keys(extraFields).length > 0 ? { extras: extraFields } : {}) });
   // Auto-expire after 10 minutes
   setTimeout(() => pendingOAuth.delete(state), 600_000);
 
@@ -214,14 +228,27 @@ router.post("/:service/oauth/reauth", (req, res) => {
   }
 
   const state = randomUUID();
-  const redirectUri = oauthRedirectUri(req, config.oauth.redirectPath);
+  // Derive redirect host from the browser's origin (handles Docker port mapping)
+  const origin = req.headers.origin || req.headers.referer;
+  const host = origin ? new URL(origin).host : req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
+  const redirectUri = `http://${host}${config.oauth.redirectPath}`;
+
+  // Carry forward any service-specific extras (e.g. developerToken)
+  const savedExtras: Record<string, string> = {};
+  if (config.extraFields) {
+    for (const field of config.extraFields) {
+      if (field.key !== "client_id" && field.key !== "client_secret" && saved.extras[field.key]) {
+        savedExtras[field.key] = saved.extras[field.key];
+      }
+    }
+  }
 
   pendingOAuth.set(state, {
     service,
     clientId: saved.extras.client_id,
     clientSecret: saved.extras.client_secret,
     redirectUri,
-    extras: saved.extras,
+    ...(Object.keys(savedExtras).length > 0 ? { extras: savedExtras } : {}),
   });
   setTimeout(() => pendingOAuth.delete(state), 600_000);
 
@@ -290,30 +317,38 @@ router.get("/:service/oauth/callback", async (req, res) => {
     }
 
     // Validate by calling the service's validation endpoint
-    const oauthExtras = { ...pending.extras, client_id: pending.clientId, client_secret: pending.clientSecret };
-    let user = "Connected";
-
+    // Include any service-specific extras (e.g. developerToken for Google Ads)
+    const allExtras = { client_id: pending.clientId, client_secret: pending.clientSecret, ...(pending.extras ?? {}) };
     const validateUrl =
       typeof config.validateUrl === "function"
-        ? config.validateUrl(oauthExtras)
+        ? config.validateUrl(allExtras)
         : config.validateUrl;
 
+    let user = "Connected";
     const validateRes = await fetch(validateUrl, {
-      headers: config.authHeader(accessToken, oauthExtras),
+      headers: config.authHeader(accessToken, allExtras),
     });
 
     if (validateRes.ok) {
       const userData = await validateRes.json();
       user = config.extractUser(userData);
+    } else {
+      // OAuth token exchange succeeded, so credentials are valid.
+      // Validation may fail for API-version or access-level reasons (e.g. Google Ads basic access).
+      // Store credentials anyway — preConnect will handle token refresh on actual API calls.
+      console.warn(`[OAuth callback] ${service} validation failed (${validateRes.status}), storing credentials anyway`);
     }
-    // If validation fails, still save — OAuth worked, validation can happen on next connect
 
-    // Persist refresh token + client credentials + extra fields
+    // Persist refresh token + client credentials + any service-specific extras
     const store = loadStore();
     store[service] = {
       token: refreshToken,
       user,
-      extras: oauthExtras,
+      extras: {
+        client_id: pending.clientId,
+        client_secret: pending.clientSecret,
+        ...(pending.extras ?? {}),
+      },
     };
     saveStore(store);
 

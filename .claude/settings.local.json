@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(qmd update:*)",
-      "Bash(qmd embed:*)"
+      "Bash(qmd embed:*)",
+      "mcp__workbot__brain_get",
+      "mcp__workbot__brain_write"
     ]
   }
 }
