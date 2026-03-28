@@ -260,11 +260,6 @@ export default function Dashboard({ onLogout }: DashboardProps) {
           );
         })()}
 
-        {activeTab === "services" && (
-          <div className="bg-surface-card/50 border border-theme border-dashed rounded-xl p-8 text-center text-theme-muted">
-            Orchestration workspace coming soon
-          </div>
-        )}
       </div>
 
       <ServiceDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
