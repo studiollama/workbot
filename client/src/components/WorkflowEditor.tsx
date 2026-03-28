@@ -6,7 +6,7 @@ import WorkflowDagView from "./WorkflowDagView";
 interface TaskNode {
   id: string;
   label: string;
-  type: "mcp_tool" | "shell" | "claude_prompt";
+  type: "mcp_tool" | "shell" | "claude_prompt" | "python" | "brain_write";
   config: any;
 }
 

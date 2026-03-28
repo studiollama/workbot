@@ -179,9 +179,89 @@ export default function WorkflowRunView({ workflowId, runId, onBack }: Props) {
   );
 }
 
+/** Render a JSON value as human-readable key-value pairs */
+function JsonView({ data, depth = 0 }: { data: unknown; depth?: number }) {
+  if (data === null || data === undefined) return <span className="text-theme-muted italic">null</span>;
+  if (typeof data === "boolean") return <span className={data ? "text-green-400" : "text-red-400"}>{String(data)}</span>;
+  if (typeof data === "number") return <span className="text-blue-400">{data}</span>;
+  if (typeof data === "string") {
+    // Multi-line strings render as blocks
+    if (data.includes("\n")) {
+      return <pre className="text-theme-primary whitespace-pre-wrap mt-0.5">{data}</pre>;
+    }
+    return <span className="text-theme-primary">{data}</span>;
+  }
+
+  if (Array.isArray(data)) {
+    if (data.length === 0) return <span className="text-theme-muted italic">[]</span>;
+    // Array of simple values — inline
+    if (data.every((v) => typeof v === "string" || typeof v === "number")) {
+      return (
+        <div className="flex flex-wrap gap-1 mt-0.5">
+          {data.map((v, i) => (
+            <span key={i} className="px-1.5 py-0.5 bg-surface-hover rounded text-[11px] text-theme-primary">{String(v)}</span>
+          ))}
+        </div>
+      );
+    }
+    // Array of objects — render each as a card
+    return (
+      <div className={`space-y-1.5 ${depth > 0 ? "ml-3 pl-2 border-l border-theme/30" : ""}`}>
+        {data.map((item, i) => (
+          <div key={i} className="bg-surface-input/50 rounded p-2">
+            <JsonView data={item} depth={depth + 1} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (typeof data === "object") {
+    const entries = Object.entries(data as Record<string, unknown>);
+    if (entries.length === 0) return <span className="text-theme-muted italic">{"{}"}</span>;
+    return (
+      <div className={`space-y-1 ${depth > 0 ? "ml-3 pl-2 border-l border-theme/30" : ""}`}>
+        {entries.map(([key, val]) => {
+          const isSimple = val === null || typeof val === "string" || typeof val === "number" || typeof val === "boolean";
+          // Status field gets special treatment
+          if (key === "status" && typeof val === "string") {
+            return (
+              <div key={key} className="flex items-center gap-2">
+                <span className="text-theme-secondary text-[11px] font-medium min-w-[80px]">{key}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                  val === "success" || val === "completed" ? "bg-green-900/50 text-green-400" :
+                  val === "error" || val === "failed" ? "bg-red-900/50 text-red-400" :
+                  "bg-surface-hover text-theme-primary"
+                }`}>{val}</span>
+              </div>
+            );
+          }
+          return (
+            <div key={key}>
+              <div className={`${isSimple ? "flex items-start gap-2" : ""}`}>
+                <span className="text-theme-secondary text-[11px] font-medium min-w-[80px] flex-shrink-0">{key}</span>
+                {isSimple ? (
+                  <JsonView data={val} depth={depth + 1} />
+                ) : (
+                  <div className="mt-0.5">
+                    <JsonView data={val} depth={depth + 1} />
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return <span className="text-theme-muted">{String(data)}</span>;
+}
+
 /** Renders node output — structured results, Claude conversations, or raw text */
 function ClaudeOutputView({ output }: { output: unknown }) {
   const [showConversation, setShowConversation] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
 
   // Check for structured workflow output (from Claude prompt nodes)
   const structuredResult = typeof output === "object" && output && (output as any).result;
@@ -189,16 +269,42 @@ function ClaudeOutputView({ output }: { output: unknown }) {
   const displayOutput = conversation ?? output;
   const messages = extractMessages(displayOutput);
 
-  // Plain text or simple output (shell, python, etc.)
-  if (!structuredResult && !messages) {
+  // Plain text
+  if (typeof output === "string") {
     return (
       <div>
         <p className="text-xs text-theme-secondary mb-1">Output</p>
-        <pre className="bg-surface-input rounded p-2 text-xs text-theme-primary font-mono whitespace-pre-wrap max-h-80 overflow-y-auto">
-          {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
-        </pre>
+        <pre className="bg-surface-input rounded p-2 text-xs text-theme-primary font-mono whitespace-pre-wrap max-h-80 overflow-y-auto">{output}</pre>
       </div>
     );
+  }
+
+  // Non-structured object (no result field, no conversation) — render as formatted JSON
+  if (!structuredResult && !messages && typeof output === "object") {
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs text-theme-secondary">Output</p>
+          <button onClick={() => setShowRaw(!showRaw)} className="text-[10px] text-theme-muted hover:text-theme-secondary transition">
+            {showRaw ? "Formatted" : "Raw JSON"}
+          </button>
+        </div>
+        {showRaw ? (
+          <pre className="bg-surface-input rounded p-2 text-xs text-theme-primary font-mono whitespace-pre-wrap max-h-80 overflow-y-auto">
+            {JSON.stringify(output, null, 2)}
+          </pre>
+        ) : (
+          <div className="bg-surface-input rounded p-3 text-xs max-h-80 overflow-y-auto">
+            <JsonView data={output} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // No output at all
+  if (!structuredResult && !messages) {
+    return null;
   }
 
   return (
@@ -206,14 +312,29 @@ function ClaudeOutputView({ output }: { output: unknown }) {
       {/* Structured result — shown prominently */}
       {structuredResult && (
         <div>
-          <p className="text-xs text-theme-secondary mb-1">Structured Result</p>
-          <pre className={`rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-60 overflow-y-auto ${
-            structuredResult.status === "error"
-              ? "bg-red-900/30 border border-red-800 text-red-300"
-              : "bg-green-900/20 border border-green-800/50 text-green-300"
-          }`}>
-            {JSON.stringify(structuredResult, null, 2)}
-          </pre>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-theme-secondary">Structured Result</p>
+            <button onClick={() => setShowRaw(!showRaw)} className="text-[10px] text-theme-muted hover:text-theme-secondary transition">
+              {showRaw ? "Formatted" : "Raw JSON"}
+            </button>
+          </div>
+          {showRaw ? (
+            <pre className={`rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-60 overflow-y-auto ${
+              structuredResult.status === "error"
+                ? "bg-red-900/30 border border-red-800 text-red-300"
+                : "bg-green-900/20 border border-green-800/50 text-green-300"
+            }`}>
+              {JSON.stringify(structuredResult, null, 2)}
+            </pre>
+          ) : (
+            <div className={`rounded p-3 text-xs max-h-60 overflow-y-auto ${
+              structuredResult.status === "error"
+                ? "bg-red-900/30 border border-red-800"
+                : "bg-green-900/20 border border-green-800/50"
+            }`}>
+              <JsonView data={structuredResult} />
+            </div>
+          )}
         </div>
       )}
 
