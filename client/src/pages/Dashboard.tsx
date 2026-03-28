@@ -6,6 +6,7 @@ import SettingsModal from "../components/SettingsModal";
 import McpPanel from "../components/McpPanel";
 import DevPanel from "../components/DevPanel";
 import SkillsPanel from "../components/SkillsPanel";
+import LogsPanel from "../components/LogsPanel";
 
 const SERVICE_ICONS: Record<string, string> = {
   github: "GH",
@@ -35,12 +36,16 @@ const SERVICE_ICONS: Record<string, string> = {
   supabase: "SB",
 };
 
-export default function Dashboard() {
+interface DashboardProps {
+  onLogout: () => void;
+}
+
+export default function Dashboard({ onLogout }: DashboardProps) {
   const { services, config, enabledServices, workbotName, loading, refresh, setEnabledServices } =
     useServices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills">("services");
+  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills" | "logs">("services");
 
   if (loading) {
     return (
@@ -58,17 +63,34 @@ export default function Dashboard() {
             <h1 className="text-2xl font-bold">{workbotName}</h1>
             <p className="text-theme-secondary text-sm mt-1">Service Connections</p>
           </div>
-          {/* Settings (gear) */}
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
-            title="Settings"
-          >
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-              <path d="M16.2 12.8a1.3 1.3 0 00.26 1.43l.05.05a1.575 1.575 0 11-2.23 2.23l-.05-.05a1.3 1.3 0 00-1.43-.26 1.3 1.3 0 00-.79 1.19v.14a1.575 1.575 0 11-3.15 0v-.07a1.3 1.3 0 00-.85-1.19 1.3 1.3 0 00-1.43.26l-.05.05a1.575 1.575 0 11-2.23-2.23l.05-.05a1.3 1.3 0 00.26-1.43 1.3 1.3 0 00-1.19-.79h-.14a1.575 1.575 0 110-3.15h.07a1.3 1.3 0 001.19-.85 1.3 1.3 0 00-.26-1.43l-.05-.05a1.575 1.575 0 112.23-2.23l.05.05a1.3 1.3 0 001.43.26h.06a1.3 1.3 0 00.79-1.19v-.14a1.575 1.575 0 013.15 0v.07a1.3 1.3 0 00.79 1.19 1.3 1.3 0 001.43-.26l.05-.05a1.575 1.575 0 112.23 2.23l-.05.05a1.3 1.3 0 00-.26 1.43v.06a1.3 1.3 0 001.19.79h.14a1.575 1.575 0 010 3.15h-.07a1.3 1.3 0 00-1.19.79z" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Settings (gear) */}
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
+              title="Settings"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                <path d="M16.2 12.8a1.3 1.3 0 00.26 1.43l.05.05a1.575 1.575 0 11-2.23 2.23l-.05-.05a1.3 1.3 0 00-1.43-.26 1.3 1.3 0 00-.79 1.19v.14a1.575 1.575 0 11-3.15 0v-.07a1.3 1.3 0 00-.85-1.19 1.3 1.3 0 00-1.43.26l-.05.05a1.575 1.575 0 11-2.23-2.23l.05-.05a1.3 1.3 0 00.26-1.43 1.3 1.3 0 00-1.19-.79h-.14a1.575 1.575 0 110-3.15h.07a1.3 1.3 0 001.19-.85 1.3 1.3 0 00-.26-1.43l-.05-.05a1.575 1.575 0 112.23-2.23l.05.05a1.3 1.3 0 001.43.26h.06a1.3 1.3 0 00.79-1.19v-.14a1.575 1.575 0 013.15 0v.07a1.3 1.3 0 00.79 1.19 1.3 1.3 0 001.43-.26l.05-.05a1.575 1.575 0 112.23 2.23l-.05.05a1.3 1.3 0 00-.26 1.43v.06a1.3 1.3 0 001.19.79h.14a1.575 1.575 0 010 3.15h-.07a1.3 1.3 0 00-1.19.79z" />
+              </svg>
+            </button>
+            {/* Logout */}
+            <button
+              onClick={async () => {
+                await api.dashboardLogout();
+                onLogout();
+              }}
+              className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
+              title="Sign out"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M7 17H4a1 1 0 01-1-1V4a1 1 0 011-1h3" />
+                <path d="M14 14l3-4-3-4" />
+                <path d="M17 10H7" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Tab bar */}
@@ -113,11 +135,22 @@ export default function Dashboard() {
           >
             Skills
           </button>
+          <button
+            onClick={() => setActiveTab("logs")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              activeTab === "logs"
+                ? "border-accent-500 text-theme-primary"
+                : "border-transparent text-theme-secondary hover:text-theme-primary"
+            }`}
+          >
+            Logs
+          </button>
         </div>
 
         {activeTab === "mcp" && <McpPanel />}
         {activeTab === "development" && <DevPanel />}
         {activeTab === "skills" && <SkillsPanel />}
+        {activeTab === "logs" && <LogsPanel />}
 
         {activeTab === "services" && (() => {
           const connected = enabledServices.filter(

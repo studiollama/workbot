@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 
 function loadPorts() {
@@ -15,15 +15,32 @@ function loadPorts() {
   }
 }
 
+function loadCerts() {
+  const keyPath = resolve(__dirname, "../.workbot/certs/server.key");
+  const certPath = resolve(__dirname, "../.workbot/certs/server.crt");
+  if (existsSync(keyPath) && existsSync(certPath)) {
+    return {
+      key: readFileSync(keyPath, "utf-8"),
+      cert: readFileSync(certPath, "utf-8"),
+    };
+  }
+  return undefined;
+}
+
 const { serverPort, clientPort } = loadPorts();
+const certs = loadCerts();
 
 export default defineConfig({
   plugins: [react()],
   server: {
     host: "0.0.0.0",
     port: clientPort,
+    ...(certs ? { https: certs } : {}),
     proxy: {
-      "/api": `http://localhost:${serverPort}`,
+      "/api": {
+        target: `https://localhost:${serverPort}`,
+        secure: false, // Accept self-signed certs
+      },
     },
   },
 });

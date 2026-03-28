@@ -1,3 +1,8 @@
+// Security model: MCP uses stdio transport (no network exposure).
+// Service tokens are encrypted at rest in services.json.
+// Decryption requires an active dashboard session (.workbot/.active-key).
+// The active key file is ephemeral — deleted on logout/shutdown.
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -7,6 +12,8 @@ import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import { resolve, isAbsolute, join } from "path";
 import { SERVICES, loadStore, PROJECT_ROOT } from "./services.js";
 import { loadMcpConfig } from "./mcp-config.js";
+import { logToolCall } from "./mcp-logger.js";
+import { readActiveKey, isStoreEncrypted } from "./crypto.js";
 import {
   BRAIN_ROOT,
   getAllNotes,
@@ -23,6 +30,27 @@ const server = new McpServer({
   name: "workbot",
   version: "0.1.0",
 });
+
+// ── Logged tool wrapper ─────────────────────────────────────────────────
+
+function loggedTool(
+  name: string,
+  description: string,
+  schema: Record<string, z.ZodTypeAny>,
+  handler: (args: any) => Promise<any>
+) {
+  loggedTool(name, description, schema, async (args: any) => {
+    const start = Date.now();
+    try {
+      const result = await handler(args);
+      logToolCall(name, args, Date.now() - start);
+      return result;
+    } catch (err) {
+      logToolCall(name, args, Date.now() - start);
+      throw err;
+    }
+  });
+}
 
 // ── Brain tools (wrap QMD CLI) ──────────────────────────────────────────
 
@@ -53,7 +81,7 @@ async function runQmd(args: string[]): Promise<string> {
   }
 }
 
-server.tool(
+loggedTool(
   "brain_search",
   "BM25 keyword search on the workbot brain (Obsidian vault). Fast, use this first.",
   { query: z.string().describe("Search keywords") },
@@ -63,7 +91,7 @@ server.tool(
   }
 );
 
-server.tool(
+loggedTool(
   "brain_vsearch",
   "Vector semantic search on the workbot brain. Slower (~5s) but finds conceptual matches. Use when keyword search misses.",
   { query: z.string().describe("Natural language question") },
@@ -73,7 +101,7 @@ server.tool(
   }
 );
 
-server.tool(
+loggedTool(
   "brain_get",
   "Retrieve a specific note from the workbot brain by path.",
   { path: z.string().describe("Note path relative to vault root, e.g. knowledge/decisions/some-note.md") },
@@ -83,7 +111,7 @@ server.tool(
   }
 );
 
-server.tool(
+loggedTool(
   "brain_update",
   "Re-index the workbot brain. Run after adding/editing notes. Optionally re-embed vectors.",
   { embed: z.boolean().optional().describe("Also regenerate vector embeddings (slower). Default false.") },
@@ -99,7 +127,7 @@ server.tool(
 
 // ── brain_write ─────────────────────────────────────────────────────────
 
-server.tool(
+loggedTool(
   "brain_write",
   "Create or update a note in the workbot brain. Validates frontmatter (requires type + status tags) and checks for wikilinks. Auto re-indexes after writing.",
   {
@@ -146,7 +174,7 @@ server.tool(
 
 // ── brain_links ─────────────────────────────────────────────────────────
 
-server.tool(
+loggedTool(
   "brain_links",
   "Show the link graph for a brain note — what it links to (outgoing) and what links to it (incoming). Useful for tracing decision chains and finding related knowledge.",
   {
@@ -190,7 +218,7 @@ server.tool(
 
 // ── brain_list ──────────────────────────────────────────────────────────
 
-server.tool(
+loggedTool(
   "brain_list",
   "List brain notes filtered by folder, tag, or status. Returns paths and titles. Use to browse the brain without needing to search.",
   {
@@ -241,7 +269,7 @@ server.tool(
 
 // ── brain_recent ────────────────────────────────────────────────────────
 
-server.tool(
+loggedTool(
   "brain_recent",
   "Show recently modified brain notes. Useful for session handoffs — see what changed since the last conversation.",
   {
@@ -300,7 +328,7 @@ function formatAgo(date: Date): string {
 
 // ── brain_orphans ───────────────────────────────────────────────────────
 
-server.tool(
+loggedTool(
   "brain_orphans",
   "Find brain notes with no incoming or outgoing wikilinks. These violate the 'no orphan notes' rule and need to be linked.",
   {},
@@ -354,7 +382,7 @@ server.tool(
 
 // ── brain_context ───────────────────────────────────────────────────────
 
-server.tool(
+loggedTool(
   "brain_context",
   "Smart session bootstrap. Loads ACTIVE.md + recent corrections + all notes tagged #status/active + recently modified notes. One call to get full session context instead of multiple reads.",
   {
@@ -431,7 +459,7 @@ function resolveAgentsPath(): string {
   return isAbsolute(p) ? p : resolve(PROJECT_ROOT, p);
 }
 
-server.tool(
+loggedTool(
   "agents_read",
   "Read the AGENTS.md file that provides context to cloud agents (Codex, Jules, etc.).",
   {},
@@ -445,7 +473,7 @@ server.tool(
   }
 );
 
-server.tool(
+loggedTool(
   "agents_write",
   "Write updated content to AGENTS.md. Use this to sync brain context to cloud agents. Preserves the Agent Reports section unless explicitly overwriting.",
   { content: z.string().describe("Full markdown content to write to AGENTS.md") },
@@ -458,7 +486,7 @@ server.tool(
 
 // ── Debug tool (temporary) ──────────────────────────────────────────────
 
-server.tool(
+loggedTool(
   "debug_env",
   "Debug: show MCP server environment info.",
   {},
@@ -486,11 +514,17 @@ server.tool(
 
 // ── Service tools ───────────────────────────────────────────────────────
 
-server.tool(
+loggedTool(
   "service_status",
   "List all workbot services and their connection status.",
   {},
   async () => {
+    if (isStoreEncrypted() && !readActiveKey()) {
+      return {
+        content: [{ type: "text", text: "Dashboard session required — log into the workbot dashboard to unlock service credentials." }],
+        isError: true,
+      };
+    }
     const store = loadStore();
     const lines: string[] = [];
     for (const [key, config] of Object.entries(SERVICES)) {
@@ -505,7 +539,7 @@ server.tool(
   }
 );
 
-server.tool(
+loggedTool(
   "service_request",
   "Make an authenticated HTTP request to a connected service. The workbot injects the correct auth headers automatically. For Azure AD services (Entra, Intune, Security, SharePoint, Outlook), token exchange is handled transparently.",
   {
@@ -528,6 +562,13 @@ server.tool(
       .describe("Additional headers to merge (e.g. Accept, Content-Type)"),
   },
   async ({ service, method, url, body, headers: extraHeaders }) => {
+    if (isStoreEncrypted() && !readActiveKey()) {
+      return {
+        content: [{ type: "text", text: "Dashboard session required — log into the workbot dashboard to unlock service credentials." }],
+        isError: true,
+      };
+    }
+
     const config = SERVICES[service];
     if (!config) {
       return {

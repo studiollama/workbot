@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import {
   SERVICES,
   loadStore,
+  saveStore,
   STORE_DIR,
   STORE_PATH,
   type StoredService,
@@ -18,11 +19,6 @@ const pendingOAuth = new Map<
   string,
   { service: string; clientId: string; clientSecret: string; redirectUri: string; extras?: Record<string, string> }
 >();
-
-function saveStore(data: Record<string, StoredService>) {
-  if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
-  writeFileSync(STORE_PATH, JSON.stringify(data, null, 2));
-}
 
 // Dashboard layout persistence
 const DASHBOARD_PATH = join(STORE_DIR, "dashboard.json");
@@ -194,7 +190,7 @@ router.post("/:service/oauth/start", (req, res) => {
   // Derive redirect host from the browser's origin (handles Docker port mapping)
   const origin = req.headers.origin || req.headers.referer;
   const host = origin ? new URL(origin).host : req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
-  const redirectUri = `http://${host}${config.oauth.redirectPath}`;
+  const redirectUri = `https://${host}${config.oauth.redirectPath}`;
 
   pendingOAuth.set(state, { service, clientId: client_id, clientSecret: client_secret, redirectUri, ...(Object.keys(extraFields).length > 0 ? { extras: extraFields } : {}) });
   // Auto-expire after 10 minutes
@@ -231,7 +227,7 @@ router.post("/:service/oauth/reauth", (req, res) => {
   // Derive redirect host from the browser's origin (handles Docker port mapping)
   const origin = req.headers.origin || req.headers.referer;
   const host = origin ? new URL(origin).host : req.headers.host || `localhost:${loadMcpConfig().serverPort}`;
-  const redirectUri = `http://${host}${config.oauth.redirectPath}`;
+  const redirectUri = `https://${host}${config.oauth.redirectPath}`;
 
   // Carry forward any service-specific extras (e.g. developerToken)
   const savedExtras: Record<string, string> = {};

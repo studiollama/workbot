@@ -1,29 +1,49 @@
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
-
-// Project root storage for service tokens (gitignored via .workbot/)
-// When running from server/, resolve up to project root
-// When running standalone (MCP), use cwd
-const PROJECT_ROOT = process.cwd().endsWith("server")
-  ? join(process.cwd(), "..")
-  : process.cwd();
-const STORE_DIR = join(PROJECT_ROOT, ".workbot");
-const STORE_PATH = join(STORE_DIR, "services.json");
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import {
+  readActiveKey,
+  encryptStore,
+  decryptStore,
+  getStoreSalt,
+} from "./crypto.js";
+import { PROJECT_ROOT, STORE_DIR, STORE_PATH } from "./paths.js";
+import type { StoredService } from "./paths.js";
 
 export { PROJECT_ROOT, STORE_DIR, STORE_PATH };
-
-export interface StoredService {
-  token: string;
-  user: string;
-  extras?: Record<string, string>;
-}
+export type { StoredService };
 
 export function loadStore(): Record<string, StoredService> {
   try {
     if (!existsSync(STORE_PATH)) return {};
-    return JSON.parse(readFileSync(STORE_PATH, "utf-8"));
+    const raw = JSON.parse(readFileSync(STORE_PATH, "utf-8"));
+
+    // Encrypted store — need active key to decrypt
+    if (raw._encrypted === true) {
+      const key = readActiveKey();
+      if (!key) {
+        console.warn("Encrypted services.json but no active key — returning empty store");
+        return {};
+      }
+      return decryptStore(raw, key);
+    }
+
+    // Legacy plaintext store
+    return raw;
   } catch {
     return {};
+  }
+}
+
+export function saveStore(data: Record<string, StoredService>): void {
+  if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
+
+  // If we have an active key, encrypt before saving
+  const key = readActiveKey();
+  const salt = getStoreSalt();
+  if (key && salt) {
+    const encrypted = encryptStore(data, key, salt);
+    writeFileSync(STORE_PATH, JSON.stringify(encrypted, null, 2));
+  } else {
+    writeFileSync(STORE_PATH, JSON.stringify(data, null, 2));
   }
 }
 

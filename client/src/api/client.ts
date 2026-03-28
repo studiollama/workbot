@@ -6,8 +6,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+
+  // On 401, fire event so App.tsx can redirect to login
+  if (res.status === 401 && !path.startsWith("/dashboard-auth/")) {
+    window.dispatchEvent(new Event("workbot-auth-expired"));
+    throw new Error("Session expired");
+  }
+
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Request failed");
+  if (!res.ok) {
+    const err: any = new Error(data.error ?? "Request failed");
+    if (data.needsOldPassword) err.needsOldPassword = true;
+    throw err;
+  }
   return data as T;
 }
 
@@ -270,4 +281,36 @@ export const api = {
     request<{ ok: boolean }>(`/skills/${id}/uninstall`, {
       method: "POST",
     }),
+
+  // Dashboard auth
+  checkSetupStatus: () =>
+    request<{ setupComplete: boolean; hasEncryptedServices: boolean }>("/dashboard-auth/setup-status"),
+
+  checkSession: () =>
+    request<{ authenticated: boolean; username: string | null }>("/dashboard-auth/session"),
+
+  setup: (username: string, password: string, oldPassword?: string) =>
+    request<{ ok: boolean; username: string }>("/dashboard-auth/setup", {
+      method: "POST",
+      body: JSON.stringify({ username, password, ...(oldPassword ? { oldPassword } : {}) }),
+    }),
+
+  login: (username: string, password: string) =>
+    request<{ ok: boolean; username: string }>("/dashboard-auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+
+  dashboardLogout: () =>
+    request<{ ok: boolean }>("/dashboard-auth/logout", { method: "POST" }),
+
+  // Logs
+  getMcpLogs: (params?: { limit?: number; offset?: number; tool?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    if (params?.tool) q.set("tool", params.tool);
+    const qs = q.toString();
+    return request<{ entries: any[]; total: number }>(`/logs/mcp${qs ? `?${qs}` : ""}`);
+  },
 };
