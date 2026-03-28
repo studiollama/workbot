@@ -19,6 +19,7 @@ interface WorkflowSummary {
     startedAt: string;
     completedAt?: string;
   } | null;
+  nextRun: string | null;
 }
 
 type View =
@@ -198,9 +199,12 @@ function WorkflowCard({
       </div>
 
       {/* Meta row */}
-      <div className="flex items-center gap-4 text-xs text-theme-muted">
+      <div className="flex items-center gap-4 text-xs text-theme-muted flex-wrap">
         <span>{wf.nodes.length} node{wf.nodes.length !== 1 ? "s" : ""}</span>
         {wf.schedule?.cron && <span>Cron: <code className="text-theme-secondary">{wf.schedule.cron}</code></span>}
+        {wf.nextRun && (
+          <span>Next: <span className="text-theme-secondary">{new Date(wf.nextRun).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span></span>
+        )}
         {wf.triggers?.map((t, i) => (
           <span key={i}>{t.type === "webhook" ? "Webhook" : "File watch"}</span>
         ))}

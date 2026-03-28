@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
+import cron from "node-cron";
 import {
   loadWorkflows,
   getWorkflow,
@@ -10,6 +11,61 @@ import {
   type WorkflowDefinition,
 } from "../workflows-config.js";
 import type { WorkflowEngine } from "../workflow-engine.js";
+
+/** Compute the next run time for a cron expression */
+function getNextCronRun(cronExpr: string): string | null {
+  if (!cron.validate(cronExpr)) return null;
+  // Parse cron fields and compute next occurrence
+  const parts = cronExpr.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+
+  const now = new Date();
+  // Brute-force: check each minute for the next 48 hours
+  for (let i = 1; i <= 48 * 60; i++) {
+    const candidate = new Date(now.getTime() + i * 60_000);
+    candidate.setSeconds(0, 0);
+    if (cronMatches(parts, candidate)) {
+      return candidate.toISOString();
+    }
+  }
+  return null;
+}
+
+function cronMatches(parts: string[], date: Date): boolean {
+  const minute = date.getMinutes();
+  const hour = date.getHours();
+  const dom = date.getDate();
+  const month = date.getMonth() + 1;
+  const dow = date.getDay();
+
+  return (
+    fieldMatches(parts[0], minute, 0, 59) &&
+    fieldMatches(parts[1], hour, 0, 23) &&
+    fieldMatches(parts[2], dom, 1, 31) &&
+    fieldMatches(parts[3], month, 1, 12) &&
+    fieldMatches(parts[4], dow, 0, 7)
+  );
+}
+
+function fieldMatches(field: string, value: number, min: number, max: number): boolean {
+  if (field === "*") return true;
+  for (const part of field.split(",")) {
+    if (part.includes("/")) {
+      const [range, stepStr] = part.split("/");
+      const step = parseInt(stepStr, 10);
+      const start = range === "*" ? min : parseInt(range, 10);
+      for (let v = start; v <= max; v += step) {
+        if (v === value) return true;
+      }
+    } else if (part.includes("-")) {
+      const [lo, hi] = part.split("-").map(Number);
+      if (value >= lo && value <= hi) return true;
+    } else {
+      if (parseInt(part, 10) === value) return true;
+    }
+  }
+  return false;
+}
 
 const router = Router();
 
@@ -25,11 +81,13 @@ router.get("/", (_req, res) => {
   const result = workflows.map((wf) => {
     const wfRuns = runs.filter((r) => r.workflowId === wf.id);
     const lastRun = wfRuns[0] ?? null;
+    const nextRun = wf.enabled && wf.schedule?.cron ? getNextCronRun(wf.schedule.cron) : null;
     return {
       ...wf,
       lastRun: lastRun
         ? { runId: lastRun.runId, status: lastRun.status, trigger: lastRun.trigger, startedAt: lastRun.startedAt, completedAt: lastRun.completedAt }
         : null,
+      nextRun,
     };
   });
 
