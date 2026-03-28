@@ -490,6 +490,9 @@ export class WorkflowEngine {
         const { PROJECT_ROOT } = await import("./paths.js");
         args.push("--project-dir", PROJECT_ROOT);
       }
+      if (config.bypassPermissions) {
+        args.push("--permission-mode", "bypassPermissions");
+      }
       const { stdout } = await execFileAsync("claude", args, {
         timeout: 300_000, // 5 min for complex prompts
         maxBuffer: 10 * 1024 * 1024,

@@ -31,6 +31,7 @@ export interface ShellConfig {
 export interface ClaudePromptConfig {
   prompt: string;
   useProjectContext?: boolean; // Pass --project-dir so Claude gets CLAUDE.md, MCP tools, brain access
+  bypassPermissions?: boolean; // Run with --permission-mode bypassPermissions (no confirmation prompts)
 }
 
 export interface PythonConfig {

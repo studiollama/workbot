@@ -311,6 +311,12 @@ function NodeConfigEditor({ node, onChange }: { node: TaskNode; onChange: (updat
               className="rounded" />
             Use project context (CLAUDE.md, MCP tools, brain)
           </label>
+          <label className="flex items-center gap-2 text-xs text-theme-secondary cursor-pointer">
+            <input type="checkbox" checked={!!node.config.bypassPermissions}
+              onChange={(e) => onChange({ config: { ...node.config, bypassPermissions: e.target.checked } })}
+              className="rounded" />
+            Bypass permissions (no confirmation prompts)
+          </label>
         </>
       )}
     </div>
