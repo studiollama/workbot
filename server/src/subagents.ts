@@ -26,6 +26,7 @@ export interface SubagentDefinition {
   claudeAuth: {
     mode: "host-spawned" | "oauth";
   };
+  bypassPermissions?: boolean;
   systemPromptPath?: string;
 }
 

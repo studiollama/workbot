@@ -120,9 +120,10 @@ router.post("/:id/spawn", (req, res) => {
     "--verbose",
   ];
 
-  // Add permission mode if requested (default: bypassPermissions)
-  const permissionMode = req.body.permissionMode ?? "bypassPermissions";
-  args.push("--permission-mode", permissionMode);
+  // Add bypass permissions if enabled on the subagent
+  if (s.bypassPermissions) {
+    args.push("--permission-mode", "bypassPermissions");
+  }
 
   // Set HOME for oauth mode so Claude uses subagent-specific credentials
   const spawnEnv: Record<string, string> = {

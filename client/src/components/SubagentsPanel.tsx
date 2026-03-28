@@ -284,6 +284,7 @@ function CreateSubagentForm({ connectedServices, onCreate, onCancel, onError }: 
   const [description, setDescription] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [authMode, setAuthMode] = useState<"host-spawned" | "oauth">("host-spawned");
+  const [bypassPerms, setBypassPerms] = useState(true);
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -291,7 +292,7 @@ function CreateSubagentForm({ connectedServices, onCreate, onCancel, onError }: 
     if (!name.trim()) { onError("Name is required"); return; }
     setBusy(true);
     try {
-      await api.createSubagent({ name, description, allowedServices: selectedServices, claudeAuth: { mode: authMode } });
+      await api.createSubagent({ name, description, allowedServices: selectedServices, claudeAuth: { mode: authMode }, bypassPermissions: bypassPerms });
       onCreate();
     } catch (err: any) {
       onError(err.message);
@@ -331,6 +332,11 @@ function CreateSubagentForm({ connectedServices, onCreate, onCancel, onError }: 
           <p className="text-[10px] text-theme-muted mt-1">Configure OAuth login after creating the subagent.</p>
         )}
       </div>
+
+      <label className="flex items-center gap-2 text-xs text-theme-secondary cursor-pointer">
+        <input type="checkbox" checked={bypassPerms} onChange={(e) => setBypassPerms(e.target.checked)} className="rounded" />
+        Bypass permissions (no confirmation prompts)
+      </label>
 
       <div>
         <label className="block text-xs text-theme-secondary mb-2">Allowed Services</label>

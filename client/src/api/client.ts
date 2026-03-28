@@ -307,7 +307,7 @@ export const api = {
   // Subagents
   getSubagents: () => request<any[]>("/subagents"),
   getSubagent: (id: string) => request<any>(`/subagents/${id}`),
-  createSubagent: (data: { name: string; description?: string; allowedServices?: string[]; claudeAuth?: { mode: string } }) =>
+  createSubagent: (data: { name: string; description?: string; allowedServices?: string[]; claudeAuth?: { mode: string }; bypassPermissions?: boolean }) =>
     request<any>("/subagents", { method: "POST", body: JSON.stringify(data) }),
   updateSubagent: (id: string, data: any) =>
     request<any>(`/subagents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
