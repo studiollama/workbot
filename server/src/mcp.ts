@@ -640,7 +640,8 @@ loggedTool(
 
 // ── Workflow tools ────────────────────────────────────────────────────
 
-import { loadWorkflows, loadRuns, getRun } from "./workflows-config.js";
+import { loadWorkflows, loadRuns, getRun, getWorkflow, upsertWorkflow, deleteWorkflow as removeWorkflow, type WorkflowDefinition } from "./workflows-config.js";
+import { randomUUID } from "crypto";
 import { WorkflowEngine } from "./workflow-engine.js";
 
 const workflowEngine = new WorkflowEngine();
@@ -725,6 +726,103 @@ loggedTool(
     }
 
     return { content: [{ type: "text", text: lines.filter(Boolean).join("\n") }] };
+  }
+);
+
+loggedTool(
+  "workflow_create",
+  "Create a new workflow DAG. Provide nodes (tasks) and edges (dependencies) to define the execution graph.",
+  {
+    name: z.string().describe("Workflow name (used as ID, kebab-cased)"),
+    description: z.string().optional().describe("What this workflow does"),
+    schedule: z.string().optional().describe("Cron expression for scheduling, e.g. '0 9 * * 1-5'"),
+    nodes: z.string().describe("JSON array of task nodes. Each node: {id, label, type: 'shell'|'python'|'mcp_tool'|'claude_prompt', config: {...}}. Shell config: {command}. Python config: {script, requirements?}. MCP config: {tool, args}. Claude config: {prompt, useProjectContext?}. Use {{nodeId.output}} for templates."),
+    edges: z.string().optional().describe("JSON array of edges. Each edge: {from, to, condition?: 'success'|'failure'|'always'}. Default condition is 'success'."),
+  },
+  async ({ name, description, schedule, nodes: nodesJson, edges: edgesJson }) => {
+    try {
+      const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || randomUUID().slice(0, 8);
+      if (getWorkflow(id)) {
+        return { content: [{ type: "text", text: `Workflow "${id}" already exists. Use workflow_update to modify it.` }], isError: true };
+      }
+
+      const nodes = JSON.parse(nodesJson);
+      const edges = edgesJson ? JSON.parse(edgesJson) : [];
+      const now = new Date().toISOString();
+
+      const wf: WorkflowDefinition = {
+        id, name, description: description ?? "", enabled: false,
+        createdAt: now, updatedAt: now,
+        ...(schedule ? { schedule: { cron: schedule } } : {}),
+        nodes, edges,
+      };
+
+      upsertWorkflow(wf);
+      workflowEngine.reload();
+
+      return {
+        content: [{ type: "text", text: `Created workflow "${id}" with ${nodes.length} nodes and ${edges.length} edges.\nEnable it with workflow_update or run it with workflow_run.` }],
+      };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Failed to create workflow: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+loggedTool(
+  "workflow_update",
+  "Update an existing workflow. Only provide the fields you want to change.",
+  {
+    workflowId: z.string().describe("Workflow ID to update"),
+    name: z.string().optional().describe("New name"),
+    description: z.string().optional().describe("New description"),
+    enabled: z.boolean().optional().describe("Enable or disable the workflow"),
+    schedule: z.string().optional().describe("New cron expression, or empty string to remove schedule"),
+    nodes: z.string().optional().describe("JSON array of nodes (replaces all nodes)"),
+    edges: z.string().optional().describe("JSON array of edges (replaces all edges)"),
+  },
+  async ({ workflowId, name, description, enabled, schedule, nodes: nodesJson, edges: edgesJson }) => {
+    const existing = getWorkflow(workflowId);
+    if (!existing) {
+      return { content: [{ type: "text", text: `Workflow "${workflowId}" not found.` }], isError: true };
+    }
+
+    try {
+      const updated: WorkflowDefinition = {
+        ...existing,
+        ...(name !== undefined ? { name } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(enabled !== undefined ? { enabled } : {}),
+        ...(schedule !== undefined ? { schedule: schedule ? { cron: schedule } : undefined } : {}),
+        ...(nodesJson !== undefined ? { nodes: JSON.parse(nodesJson) } : {}),
+        ...(edgesJson !== undefined ? { edges: JSON.parse(edgesJson) } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+
+      upsertWorkflow(updated);
+      workflowEngine.reload();
+
+      return {
+        content: [{ type: "text", text: `Updated workflow "${workflowId}". Enabled: ${updated.enabled}, ${updated.nodes.length} nodes, ${updated.edges.length} edges.` }],
+      };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Failed to update workflow: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+loggedTool(
+  "workflow_delete",
+  "Delete a workflow by ID.",
+  {
+    workflowId: z.string().describe("Workflow ID to delete"),
+  },
+  async ({ workflowId }) => {
+    if (!removeWorkflow(workflowId)) {
+      return { content: [{ type: "text", text: `Workflow "${workflowId}" not found.` }], isError: true };
+    }
+    workflowEngine.reload();
+    return { content: [{ type: "text", text: `Deleted workflow "${workflowId}".` }] };
   }
 );
 
