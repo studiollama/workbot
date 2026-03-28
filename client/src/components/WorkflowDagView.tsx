@@ -43,6 +43,7 @@ const TYPE_BADGES: Record<string, { label: string; className: string }> = {
   python: { label: "PY", className: "bg-yellow-900/50 text-yellow-400" },
   mcp_tool: { label: "MCP", className: "bg-blue-900/50 text-blue-400" },
   claude_prompt: { label: "AI", className: "bg-purple-900/50 text-purple-400" },
+  brain_write: { label: "BRAIN", className: "bg-orange-900/50 text-orange-400" },
 };
 
 export default function WorkflowDagView({ nodes, edges, nodeStatuses, onNodeClick, selectedNode }: Props) {

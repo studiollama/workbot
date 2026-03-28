@@ -40,11 +40,20 @@ export interface PythonConfig {
   timeout?: number;
 }
 
+export interface BrainWriteConfig {
+  action: "note" | "project" | "update_active" | "archive_result";
+  title?: string;          // Note title (for note/project)
+  path?: string;           // Explicit path override
+  tags?: string;           // Comma-separated tags
+  content?: string;        // Static content (can use {{templates}})
+  useNodeOutput?: string;  // Node ID to use output from as content
+}
+
 export interface TaskNode {
   id: string;
   label: string;
-  type: "mcp_tool" | "shell" | "claude_prompt" | "python";
-  config: McpToolConfig | ShellConfig | ClaudePromptConfig | PythonConfig;
+  type: "mcp_tool" | "shell" | "claude_prompt" | "python" | "brain_write";
+  config: McpToolConfig | ShellConfig | ClaudePromptConfig | PythonConfig | BrainWriteConfig;
 }
 
 export interface TaskEdge {

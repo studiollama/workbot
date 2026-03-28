@@ -179,13 +179,18 @@ export default function WorkflowRunView({ workflowId, runId, onBack }: Props) {
   );
 }
 
-/** Renders Claude JSON output as a chat-like conversation, or falls back to raw display */
+/** Renders node output — structured results, Claude conversations, or raw text */
 function ClaudeOutputView({ output }: { output: unknown }) {
-  // Check if this is Claude JSON output (array of messages or object with result/messages)
-  const messages = extractMessages(output);
+  const [showConversation, setShowConversation] = useState(false);
 
-  if (!messages) {
-    // Plain text or non-Claude JSON — show raw
+  // Check for structured workflow output (from Claude prompt nodes)
+  const structuredResult = typeof output === "object" && output && (output as any).result;
+  const conversation = typeof output === "object" && output && (output as any).conversation;
+  const displayOutput = conversation ?? output;
+  const messages = extractMessages(displayOutput);
+
+  // Plain text or simple output (shell, python, etc.)
+  if (!structuredResult && !messages) {
     return (
       <div>
         <p className="text-xs text-theme-secondary mb-1">Output</p>
@@ -196,35 +201,70 @@ function ClaudeOutputView({ output }: { output: unknown }) {
     );
   }
 
-  // Render as chat messages
   return (
-    <div>
-      <p className="text-xs text-theme-secondary mb-1">Claude Conversation</p>
-      <div className="space-y-2 max-h-[500px] overflow-y-auto">
-        {messages.map((msg, i) => (
-          <div key={i} className={`rounded-lg p-2 text-xs ${
-            msg.role === "assistant"
-              ? "bg-blue-900/20 border border-blue-800/50"
-              : msg.role === "user"
-              ? "bg-surface-input border border-theme-input"
-              : "bg-purple-900/20 border border-purple-800/50"
+    <div className="space-y-3">
+      {/* Structured result — shown prominently */}
+      {structuredResult && (
+        <div>
+          <p className="text-xs text-theme-secondary mb-1">Structured Result</p>
+          <pre className={`rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-60 overflow-y-auto ${
+            structuredResult.status === "error"
+              ? "bg-red-900/30 border border-red-800 text-red-300"
+              : "bg-green-900/20 border border-green-800/50 text-green-300"
           }`}>
-            <div className="flex items-center gap-2 mb-1">
-              <span className={`text-[10px] font-medium uppercase ${
-                msg.role === "assistant" ? "text-blue-400" :
-                msg.role === "user" ? "text-theme-secondary" :
-                "text-purple-400"
-              }`}>{msg.role}</span>
-              {msg.type && msg.type !== "text" && (
-                <span className="text-[10px] text-theme-muted px-1 py-0.5 bg-surface-hover rounded">{msg.type}</span>
-              )}
+            {JSON.stringify(structuredResult, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {/* Claude conversation — collapsible */}
+      {messages && (
+        <div>
+          <button
+            onClick={() => setShowConversation(!showConversation)}
+            className="text-xs text-accent-400 hover:text-accent-300 transition"
+          >
+            {showConversation ? "Hide" : "Show"} full conversation ({messages.length} messages)
+          </button>
+          {showConversation && (
+            <div className="space-y-2 mt-2 max-h-[500px] overflow-y-auto">
+              {messages.map((msg, i) => (
+                <div key={i} className={`rounded-lg p-2 text-xs ${
+                  msg.role === "assistant"
+                    ? "bg-blue-900/20 border border-blue-800/50"
+                    : msg.role === "user"
+                    ? "bg-surface-input border border-theme-input"
+                    : "bg-purple-900/20 border border-purple-800/50"
+                }`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`text-[10px] font-medium uppercase ${
+                      msg.role === "assistant" ? "text-blue-400" :
+                      msg.role === "user" ? "text-theme-secondary" :
+                      "text-purple-400"
+                    }`}>{msg.role}</span>
+                    {msg.type && msg.type !== "text" && (
+                      <span className="text-[10px] text-theme-muted px-1 py-0.5 bg-surface-hover rounded">{msg.type}</span>
+                    )}
+                  </div>
+                  <div className="text-theme-primary whitespace-pre-wrap font-mono">
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="text-theme-primary whitespace-pre-wrap font-mono">
-              {msg.content}
-            </div>
-          </div>
-        ))}
-      </div>
+          )}
+        </div>
+      )}
+
+      {/* Fallback for non-structured, non-conversation output */}
+      {!structuredResult && !messages && (
+        <div>
+          <p className="text-xs text-theme-secondary mb-1">Output</p>
+          <pre className="bg-surface-input rounded p-2 text-xs text-theme-primary font-mono whitespace-pre-wrap max-h-80 overflow-y-auto">
+            {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -238,12 +278,10 @@ interface ChatMessage {
 function extractMessages(output: unknown): ChatMessage[] | null {
   if (!output || typeof output !== "object") return null;
 
-  // Claude --output-format json returns an array of message objects
   if (Array.isArray(output)) {
     const msgs: ChatMessage[] = [];
     for (const item of output) {
       if (item.type === "result") {
-        // Final result message
         const text = typeof item.result === "string" ? item.result :
           Array.isArray(item.result) ? item.result.map((b: any) => b.text ?? JSON.stringify(b)).join("\n") :
           JSON.stringify(item.result, null, 2);
@@ -272,7 +310,6 @@ function extractMessages(output: unknown): ChatMessage[] | null {
     return msgs.length > 0 ? msgs : null;
   }
 
-  // Single result object
   const obj = output as any;
   if (obj.result || obj.content || obj.message) {
     const text = typeof (obj.result ?? obj.content ?? obj.message) === "string"

@@ -16,6 +16,7 @@ import {
   type ShellConfig,
   type ClaudePromptConfig,
   type PythonConfig,
+  type BrainWriteConfig,
 } from "./workflows-config.js";
 import { loadStore, SERVICES } from "./services.js";
 import { loadMcpConfig } from "./mcp-config.js";
@@ -307,6 +308,9 @@ export class WorkflowEngine {
         case "python":
           output = await this.execPython(resolvedConfig as PythonConfig);
           break;
+        case "brain_write":
+          output = await this.execBrainWrite(resolvedConfig as BrainWriteConfig, run);
+          break;
       }
 
       nr.status = "completed";
@@ -484,28 +488,156 @@ export class WorkflowEngine {
   }
 
   private async execClaudePrompt(config: ClaudePromptConfig): Promise<unknown> {
+    // Append structured output instruction so downstream nodes can grab results
+    const structuredSuffix = `\n\nIMPORTANT: At the end of your response, include a JSON block wrapped in <workflow-output> tags containing your structured result. Example:\n<workflow-output>\n{"status": "success", "summary": "...", "data": {...}}\n</workflow-output>\nIf the task failed or could not be completed, set status to "error" with a "reason" field.`;
+
+    const fullPrompt = config.prompt + structuredSuffix;
+
     try {
-      const args = ["-p", config.prompt, "--output-format", "json"];
+      const args = ["-p", fullPrompt, "--output-format", "json"];
       if (config.bypassPermissions) {
         args.push("--permission-mode", "bypassPermissions");
       }
       const { PROJECT_ROOT } = await import("./paths.js");
       const { stdout } = await execFileAsync("claude", args, {
-        timeout: 300_000, // 5 min for complex prompts
+        timeout: 300_000,
         maxBuffer: 10 * 1024 * 1024,
         cwd: config.useProjectContext ? PROJECT_ROOT : undefined,
       });
 
-      // Parse JSON output — contains full conversation with tool calls, thinking, etc.
-      try {
-        const parsed = JSON.parse(stdout);
-        return parsed;
-      } catch {
-        // Fallback to raw text if JSON parse fails
-        return stdout.trim();
+      // Parse Claude JSON output
+      let parsed: any;
+      try { parsed = JSON.parse(stdout); } catch { parsed = stdout.trim(); }
+
+      // Extract structured output from <workflow-output> tags
+      const structuredResult = this.extractWorkflowOutput(parsed);
+
+      // Check if the AI reported an error
+      if (structuredResult?.status === "error") {
+        throw new Error(structuredResult.reason ?? "Task reported error status");
       }
+
+      // Return both the full conversation and the structured result
+      return {
+        conversation: parsed,
+        result: structuredResult,
+      };
     } catch (err: any) {
       throw new Error(`Claude prompt failed: ${err.message}`);
+    }
+  }
+
+  /** Extract <workflow-output>JSON</workflow-output> from Claude's response */
+  private extractWorkflowOutput(parsed: any): any {
+    // Search through the conversation for the workflow-output tag
+    const text = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+    const match = text.match(/<workflow-output>\s*([\s\S]*?)\s*<\/workflow-output>/);
+    if (match) {
+      try { return JSON.parse(match[1]); } catch { return null; }
+    }
+    return null;
+  }
+
+  // ── Brain Write Executor ──────────────────────────────────────────────
+
+  private async execBrainWrite(config: BrainWriteConfig, run: WorkflowRun): Promise<string> {
+    const { writeNote, BRAIN_ROOT } = await import("./brain-utils.js");
+    const { existsSync, readFileSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { mkdirSync } = await import("fs");
+
+    // Determine content — either static or from a node's output
+    let content = config.content ?? "";
+    if (config.useNodeOutput) {
+      const sourceResult = run.nodeResults[config.useNodeOutput];
+      if (sourceResult?.output) {
+        const out = sourceResult.output;
+        // If it's a Claude structured output, grab the result
+        if (typeof out === "object" && (out as any).result) {
+          content = typeof (out as any).result === "string"
+            ? (out as any).result
+            : JSON.stringify((out as any).result, null, 2);
+        } else {
+          content = typeof out === "string" ? out : JSON.stringify(out, null, 2);
+        }
+      }
+    }
+
+    const now = new Date();
+    const tags = config.tags ? config.tags.split(",").map((t) => t.trim()) : [];
+
+    switch (config.action) {
+      case "note": {
+        const title = config.title ?? `Workflow Note ${now.toISOString().slice(0, 10)}`;
+        const path = config.path ?? `knowledge/notes/${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`;
+        const frontmatter = [
+          "---",
+          `title: ${title}`,
+          `tags:`,
+          `  - note`,
+          `  - status/active`,
+          ...tags.map((t) => `  - ${t}`),
+          `created: ${now.toISOString()}`,
+          "---",
+        ].join("\n");
+        writeNote(path, `${frontmatter}\n\n${content}`);
+        return `Written note: ${path}`;
+      }
+
+      case "project": {
+        const title = config.title ?? `Project Update`;
+        const path = config.path ?? `knowledge/projects/${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`;
+        const frontmatter = [
+          "---",
+          `title: ${title}`,
+          `tags:`,
+          `  - project`,
+          `  - status/active`,
+          ...tags.map((t) => `  - ${t}`),
+          `created: ${now.toISOString()}`,
+          "---",
+        ].join("\n");
+        writeNote(path, `${frontmatter}\n\n${content}`);
+        return `Written project note: ${path}`;
+      }
+
+      case "update_active": {
+        const activePath = join(BRAIN_ROOT, "context", "ACTIVE.md");
+        const existing = existsSync(activePath) ? readFileSync(activePath, "utf-8") : "";
+        const timestamp = now.toISOString().slice(0, 16).replace("T", " ");
+        const updated = existing + `\n\n## Update ${timestamp}\n\n${content}`;
+        writeFileSync(activePath, updated);
+        return `Updated ACTIVE.md`;
+      }
+
+      case "archive_result": {
+        const year = String(now.getFullYear());
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const workflowName = run.workflowId;
+        const archiveDir = `archive/${year}/${month}/${workflowName}`;
+        const fileName = `${now.toISOString().slice(0, 10)}-${run.runId.slice(0, 8)}.md`;
+        const path = `${archiveDir}/${fileName}`;
+        const frontmatter = [
+          "---",
+          `title: ${workflowName} run ${now.toISOString().slice(0, 10)}`,
+          `tags:`,
+          `  - retrospective`,
+          `  - status/archived`,
+          ...tags.map((t) => `  - ${t}`),
+          `workflow: ${workflowName}`,
+          `runId: ${run.runId}`,
+          `created: ${now.toISOString()}`,
+          "---",
+        ].join("\n");
+        // Ensure directory exists
+        const fullDir = join(BRAIN_ROOT, archiveDir);
+        mkdirSync(fullDir, { recursive: true });
+        writeNote(path, `${frontmatter}\n\n${content}`);
+        return `Archived to: ${path}`;
+      }
+
+      default:
+        throw new Error(`Unknown brain_write action: ${config.action}`);
     }
   }
 }

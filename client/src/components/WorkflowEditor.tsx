@@ -87,6 +87,7 @@ export default function WorkflowEditor({ workflowId, onSave, onCancel }: Props) 
       shell: { command: "", timeout: 30000 },
       claude_prompt: { prompt: "", useProjectContext: true },
       python: { script: "", timeout: 60000 },
+      brain_write: { action: "archive_result", title: "", useNodeOutput: "" },
     };
     const node: TaskNode = { id, label: id, type, config: defaults[type] };
     setData((d) => ({ ...d, nodes: [...d.nodes, node] }));
@@ -178,6 +179,7 @@ export default function WorkflowEditor({ workflowId, onSave, onCancel }: Props) 
             <button onClick={() => addNode("python")} className="px-2 py-1 text-xs bg-surface-input hover:bg-surface-hover text-theme-secondary rounded transition">+ Python</button>
             <button onClick={() => addNode("mcp_tool")} className="px-2 py-1 text-xs bg-surface-input hover:bg-surface-hover text-theme-secondary rounded transition">+ MCP Tool</button>
             <button onClick={() => addNode("claude_prompt")} className="px-2 py-1 text-xs bg-surface-input hover:bg-surface-hover text-theme-secondary rounded transition">+ Prompt</button>
+            <button onClick={() => addNode("brain_write")} className="px-2 py-1 text-xs bg-surface-input hover:bg-surface-hover text-theme-secondary rounded transition">+ Brain</button>
           </div>
         </div>
 
@@ -189,8 +191,15 @@ export default function WorkflowEditor({ workflowId, onSave, onCancel }: Props) 
                   node.type === "shell" ? "bg-green-900/50 text-green-400" :
                   node.type === "python" ? "bg-yellow-900/50 text-yellow-400" :
                   node.type === "mcp_tool" ? "bg-blue-900/50 text-blue-400" :
+                  node.type === "brain_write" ? "bg-orange-900/50 text-orange-400" :
                   "bg-purple-900/50 text-purple-400"
-                }`}>{node.type === "mcp_tool" ? "MCP" : node.type === "shell" ? "SHELL" : node.type === "python" ? "PYTHON" : "PROMPT"}</span>
+                }`}>{
+                  node.type === "mcp_tool" ? "MCP" :
+                  node.type === "shell" ? "SHELL" :
+                  node.type === "python" ? "PYTHON" :
+                  node.type === "brain_write" ? "BRAIN" :
+                  "PROMPT"
+                }</span>
                 <span className="text-sm font-mono">{node.label}</span>
               </div>
               <div className="flex gap-1">
@@ -295,6 +304,49 @@ function NodeConfigEditor({ node, onChange }: { node: TaskNode; onChange: (updat
               className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono resize-y" />
           </div>
           <p className="text-[10px] text-theme-muted">Use {"{{nodeId.output}}"} in the script. Output is captured from stdout.</p>
+        </>
+      )}
+
+      {node.type === "brain_write" && (
+        <>
+          <div>
+            <label className="block text-xs text-theme-secondary mb-1">Action</label>
+            <select value={node.config.action ?? "archive_result"} onChange={(e) => onChange({ config: { ...node.config, action: e.target.value } })}
+              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none">
+              <option value="archive_result">Archive Result (year/month/workflow)</option>
+              <option value="note">Write Note (knowledge/notes/)</option>
+              <option value="project">Write Project Note (knowledge/projects/)</option>
+              <option value="update_active">Append to ACTIVE.md</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-theme-secondary mb-1">Title</label>
+            <input value={node.config.title ?? ""} onChange={(e) => onChange({ config: { ...node.config, title: e.target.value } })}
+              placeholder={node.config.action === "update_active" ? "(not used)" : "Note title"}
+              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
+          </div>
+          <div>
+            <label className="block text-xs text-theme-secondary mb-1">Source Node Output</label>
+            <select value={node.config.useNodeOutput ?? ""} onChange={(e) => onChange({ config: { ...node.config, useNodeOutput: e.target.value } })}
+              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none">
+              <option value="">None (use static content below)</option>
+              {data.nodes.filter((n) => n.id !== node.id).map((n) => (
+                <option key={n.id} value={n.id}>{n.label} ({n.id})</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-theme-secondary mb-1">Static Content (optional)</label>
+            <textarea value={node.config.content ?? ""} onChange={(e) => onChange({ config: { ...node.config, content: e.target.value } })}
+              rows={3} placeholder="Content to write (ignored if source node selected)"
+              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono resize-y" />
+          </div>
+          <div>
+            <label className="block text-xs text-theme-secondary mb-1">Tags (comma-separated)</label>
+            <input value={node.config.tags ?? ""} onChange={(e) => onChange({ config: { ...node.config, tags: e.target.value } })}
+              placeholder="domain/email, automation"
+              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
+          </div>
         </>
       )}
 
