@@ -93,6 +93,7 @@ export default function SubagentsPanel() {
                 try { await api.deleteSubagent(s.id); fetchSubagents(); }
                 catch (err: any) { setError(err.message); }
               }}
+              onRefresh={fetchSubagents}
             />
           ))}
         </div>
@@ -101,12 +102,63 @@ export default function SubagentsPanel() {
   );
 }
 
-function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete }: {
+function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh }: {
   subagent: SubagentSummary;
   onToggle: () => void;
   onSpawn: () => void;
   onDelete: () => void;
+  onRefresh: () => void;
 }) {
+  const [authStatus, setAuthStatus] = useState<{ mode: string; authenticated: boolean } | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [loginInfo, setLoginInfo] = useState<{ verificationUrl?: string; userCode?: string } | null>(null);
+  const [tokenInput, setTokenInput] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+
+  useEffect(() => {
+    if (s.claudeAuth.mode === "oauth") {
+      api.getSubagentAuthStatus(s.id).then(setAuthStatus).catch(() => {});
+    }
+  }, [s.id, s.claudeAuth.mode]);
+
+  async function handleLogin() {
+    setAuthBusy(true);
+    try {
+      const result = await api.startSubagentLogin(s.id);
+      setLoginInfo(result);
+      // Poll for completion
+      const poll = setInterval(async () => {
+        const check = await api.checkSubagentLogin(s.id);
+        if (check.authenticated) {
+          clearInterval(poll);
+          setLoginInfo(null);
+          setAuthBusy(false);
+          setAuthStatus({ mode: "oauth", authenticated: true });
+          onRefresh();
+        }
+      }, 3000);
+      // Stop polling after 5 minutes
+      setTimeout(() => { clearInterval(poll); setAuthBusy(false); }, 300_000);
+    } catch { setAuthBusy(false); }
+  }
+
+  async function handlePasteToken() {
+    if (!tokenInput.trim()) return;
+    setAuthBusy(true);
+    try {
+      await api.setSubagentToken(s.id, tokenInput.trim());
+      setTokenInput("");
+      setAuthStatus({ mode: "oauth", authenticated: true });
+      onRefresh();
+    } catch { /* ignore */ }
+    finally { setAuthBusy(false); }
+  }
+
+  async function handleLogout() {
+    await api.subagentLogout(s.id);
+    setAuthStatus({ mode: "oauth", authenticated: false });
+  }
+
   return (
     <div className="bg-surface-card rounded-xl p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -139,8 +191,77 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete }: {
       <div className="flex items-center gap-4 text-xs text-theme-muted">
         <span>Brain: <code className="text-theme-secondary">{s.brainPath}</code></span>
         <span>{s.allowedServices.length} service{s.allowedServices.length !== 1 ? "s" : ""}</span>
-        <span>{s.claudeAuth.mode}</span>
+        <span className="flex items-center gap-1">
+          {s.claudeAuth.mode}
+          {s.claudeAuth.mode === "oauth" && authStatus && (
+            <span className={`w-1.5 h-1.5 rounded-full ${authStatus.authenticated ? "bg-green-500" : "bg-red-500"}`} />
+          )}
+        </span>
+        <button onClick={() => setShowAuth(!showAuth)} className="text-accent-400 hover:text-accent-300 transition">
+          {showAuth ? "Hide Auth" : "Auth"}
+        </button>
       </div>
+
+      {/* Auth section */}
+      {showAuth && (
+        <div className="bg-surface-input/50 rounded-lg p-3 space-y-2">
+          {s.claudeAuth.mode === "host-spawned" ? (
+            <p className="text-xs text-theme-muted">Uses host's Claude account. No separate auth needed.</p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-theme-secondary">
+                  {authStatus?.authenticated ? "Authenticated" : "Not authenticated"}
+                </span>
+                <div className="flex gap-1">
+                  {!authStatus?.authenticated && (
+                    <button onClick={handleLogin} disabled={authBusy}
+                      className="px-2 py-1 text-xs bg-accent-600 hover:bg-accent-700 text-white rounded transition disabled:opacity-50">
+                      {authBusy ? "..." : "Login with Claude"}
+                    </button>
+                  )}
+                  {authStatus?.authenticated && (
+                    <button onClick={handleLogout} className="px-2 py-1 text-xs text-theme-secondary hover:text-red-400 transition">
+                      Logout
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Device code flow info */}
+              {loginInfo && (
+                <div className="bg-surface-card rounded p-2 space-y-1">
+                  {loginInfo.verificationUrl && (
+                    <p className="text-xs">
+                      Open: <a href={loginInfo.verificationUrl} target="_blank" rel="noopener" className="text-accent-400 hover:text-accent-300 underline">{loginInfo.verificationUrl}</a>
+                    </p>
+                  )}
+                  {loginInfo.userCode && (
+                    <p className="text-xs">Code: <code className="text-theme-primary font-bold">{loginInfo.userCode}</code></p>
+                  )}
+                  <p className="text-[10px] text-theme-muted">Complete login in browser. This will update automatically.</p>
+                </div>
+              )}
+
+              {/* Manual token paste */}
+              {!authStatus?.authenticated && !loginInfo && (
+                <div className="flex gap-2">
+                  <input
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    placeholder="Paste OAuth token (sk-ant-oat01-...)"
+                    className="flex-1 px-2 py-1 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono"
+                  />
+                  <button onClick={handlePasteToken} disabled={!tokenInput.trim() || authBusy}
+                    className="px-2 py-1 text-xs bg-surface-hover hover:bg-surface-input text-theme-secondary rounded transition disabled:opacity-30">
+                    Save
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {s.allowedServices.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -162,6 +283,7 @@ function CreateSubagentForm({ connectedServices, onCreate, onCancel, onError }: 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [authMode, setAuthMode] = useState<"host-spawned" | "oauth">("host-spawned");
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -169,7 +291,7 @@ function CreateSubagentForm({ connectedServices, onCreate, onCancel, onError }: 
     if (!name.trim()) { onError("Name is required"); return; }
     setBusy(true);
     try {
-      await api.createSubagent({ name, description, allowedServices: selectedServices });
+      await api.createSubagent({ name, description, allowedServices: selectedServices, claudeAuth: { mode: authMode } });
       onCreate();
     } catch (err: any) {
       onError(err.message);
@@ -196,6 +318,18 @@ function CreateSubagentForm({ connectedServices, onCreate, onCancel, onError }: 
           <input value={description} onChange={(e) => setDescription(e.target.value)}
             className="w-full px-3 py-2 bg-surface-input border border-theme-input rounded-lg text-sm text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
         </div>
+      </div>
+
+      <div>
+        <label className="block text-xs text-theme-secondary mb-1">Claude Auth Mode</label>
+        <select value={authMode} onChange={(e) => setAuthMode(e.target.value as any)}
+          className="w-full px-3 py-2 bg-surface-input border border-theme-input rounded-lg text-sm text-theme-primary focus:outline-none">
+          <option value="host-spawned">Host Spawned (uses host's Claude account)</option>
+          <option value="oauth">OAuth (separate Claude account)</option>
+        </select>
+        {authMode === "oauth" && (
+          <p className="text-[10px] text-theme-muted mt-1">Configure OAuth login after creating the subagent.</p>
+        )}
       </div>
 
       <div>

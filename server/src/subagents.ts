@@ -24,8 +24,7 @@ export interface SubagentDefinition {
   brainPath: string; // relative to BRAIN_ROOT, always "subagents/{id}"
   qmdIndex: string | null; // path to .workbot/qmd-indexes/{id}/
   claudeAuth: {
-    mode: "host-spawned" | "independent";
-    accountId?: string;
+    mode: "host-spawned" | "oauth";
   };
   systemPromptPath?: string;
 }
@@ -174,4 +173,14 @@ export function ensureBrainDir(subagent: SubagentDefinition): void {
 
 export function getSubagentBrainRoot(subagentId: string): string {
   return join(BRAIN_ROOT, "subagents", subagentId);
+}
+
+// ── Claude Home Directory ──────────────────────────────────────────────
+
+export function getSubagentClaudeHome(subagentId: string): string {
+  const dir = join(STORE_DIR, "subagent-claude-home", subagentId);
+  mkdirSync(dir, { recursive: true });
+  // Ensure .claude subdir exists (where credentials.json lives)
+  mkdirSync(join(dir, ".claude"), { recursive: true });
+  return dir;
 }

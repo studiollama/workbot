@@ -307,7 +307,7 @@ export const api = {
   // Subagents
   getSubagents: () => request<any[]>("/subagents"),
   getSubagent: (id: string) => request<any>(`/subagents/${id}`),
-  createSubagent: (data: { name: string; description?: string; allowedServices?: string[] }) =>
+  createSubagent: (data: { name: string; description?: string; allowedServices?: string[]; claudeAuth?: { mode: string } }) =>
     request<any>("/subagents", { method: "POST", body: JSON.stringify(data) }),
   updateSubagent: (id: string, data: any) =>
     request<any>(`/subagents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
@@ -320,6 +320,16 @@ export const api = {
     }),
   getSubagentServices: (id: string) =>
     request<Record<string, { connected: boolean; user?: string; allowed: boolean }>>(`/subagents/${id}/services`),
+  startSubagentLogin: (id: string) =>
+    request<{ started: boolean; verificationUrl?: string; userCode?: string; rawOutput?: string }>(`/subagents/${id}/auth/login`, { method: "POST" }),
+  checkSubagentLogin: (id: string) =>
+    request<{ authenticated: boolean; raw?: string }>(`/subagents/${id}/auth/check`, { method: "POST" }),
+  setSubagentToken: (id: string, token: string) =>
+    request<{ ok: boolean }>(`/subagents/${id}/auth/token`, { method: "POST", body: JSON.stringify({ token }) }),
+  getSubagentAuthStatus: (id: string) =>
+    request<{ mode: string; authenticated: boolean; raw?: string; hasCredentials?: boolean }>(`/subagents/${id}/auth/status`),
+  subagentLogout: (id: string) =>
+    request<{ ok: boolean }>(`/subagents/${id}/auth/logout`, { method: "POST" }),
 
   // Workflows (scope = subagentId for scoped calls, undefined for host)
   getWorkflows: (scope?: string) => request<any[]>(scope ? `/subagents/${scope}/workflows` : "/workflows"),

@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { spawn } from "child_process";
 import { resolve } from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { writeFileSync, existsSync, readFileSync } from "fs";
+import { join } from "path";
 import {
   loadSubagents,
   getSubagent,
@@ -8,7 +12,10 @@ import {
   updateSubagent,
   deleteSubagent,
   ensureBrainDir,
+  getSubagentClaudeHome,
 } from "../subagents.js";
+
+const execFileAsync = promisify(execFile);
 import { SERVICES, loadStore } from "../services.js";
 import { readLogs } from "../mcp-logger.js";
 import { PROJECT_ROOT } from "../paths.js";
@@ -114,14 +121,20 @@ router.post("/:id/spawn", (req, res) => {
   // Set cwd to subagent brain for context
   const cwd = resolve(PROJECT_ROOT, "workbot-brain", "subagents", s.id);
 
+  // Set HOME for oauth mode so Claude uses subagent-specific credentials
+  const spawnEnv: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    MCP_SERVER_CMD: mcpServerCmd,
+  };
+  if (s.claudeAuth.mode === "oauth") {
+    spawnEnv.HOME = getSubagentClaudeHome(s.id);
+  }
+
   const proc = spawn("claude", args, {
     cwd,
     stdio: "pipe",
     detached: true,
-    env: {
-      ...process.env,
-      MCP_SERVER_CMD: mcpServerCmd,
-    },
+    env: spawnEnv,
   });
 
   proc.unref();
@@ -265,6 +278,145 @@ router.get("/:id/workflows/:wfId/runs/:runId", (req, res) => {
   const run = getRun(req.params.runId, req.params.id);
   if (!run) return res.status(404).json({ error: "Run not found" });
   res.json(run);
+});
+
+// ── Subagent Claude Auth ────────────────────────────────────────────────
+
+// Active login processes (device-code flow)
+const pendingLogins = new Map<string, { proc: ReturnType<typeof spawn>; output: string }>();
+
+// POST /api/subagents/:id/auth/login — Start OAuth device-code flow
+router.post("/:id/auth/login", (req, res) => {
+  const s = getSubagent(req.params.id);
+  if (!s) return res.status(404).json({ error: "Subagent not found" });
+
+  const home = getSubagentClaudeHome(s.id);
+  const proc = spawn("claude", ["auth", "login", "--claudeai"], {
+    env: { ...process.env, HOME: home },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  let output = "";
+  proc.stdout.on("data", (d) => { output += d.toString(); });
+  proc.stderr.on("data", (d) => { output += d.toString(); });
+
+  pendingLogins.set(s.id, { proc, output: "" });
+
+  // Wait a few seconds for the verification URL to appear
+  setTimeout(() => {
+    const pending = pendingLogins.get(s.id);
+    if (pending) pending.output = output;
+
+    // Try to extract verification URL and user code
+    const urlMatch = output.match(/https?:\/\/[^\s]+/);
+    const codeMatch = output.match(/code[:\s]+([A-Z0-9-]+)/i);
+
+    res.json({
+      started: true,
+      verificationUrl: urlMatch?.[0] ?? null,
+      userCode: codeMatch?.[1] ?? null,
+      rawOutput: output.slice(0, 500),
+    });
+  }, 5000);
+});
+
+// POST /api/subagents/:id/auth/check — Check if login completed
+router.post("/:id/auth/check", async (req, res) => {
+  const s = getSubagent(req.params.id);
+  if (!s) return res.status(404).json({ error: "Subagent not found" });
+
+  const home = getSubagentClaudeHome(s.id);
+  try {
+    const { stdout } = await execFileAsync("claude", ["auth", "status"], {
+      env: { ...process.env, HOME: home },
+      timeout: 10_000,
+    });
+    const loggedIn = stdout.includes("Logged in") || stdout.includes("loggedIn");
+    res.json({ authenticated: loggedIn, raw: stdout.trim() });
+  } catch {
+    res.json({ authenticated: false });
+  }
+});
+
+// POST /api/subagents/:id/auth/token — Manual token paste
+router.post("/:id/auth/token", (req, res) => {
+  const s = getSubagent(req.params.id);
+  if (!s) return res.status(404).json({ error: "Subagent not found" });
+
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: "Token is required" });
+
+  const home = getSubagentClaudeHome(s.id);
+  const credPath = join(home, ".claude", ".credentials.json");
+
+  // Write credentials file in Claude's expected format
+  const creds = {
+    claudeAiOauth: {
+      accessToken: token,
+      refreshToken: token, // If it's a refresh token, it works for both
+      expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000, // 1 year
+    },
+  };
+  writeFileSync(credPath, JSON.stringify(creds, null, 2));
+
+  // Update subagent mode to oauth
+  if (s.claudeAuth.mode !== "oauth") {
+    updateSubagent(s.id, { claudeAuth: { mode: "oauth" } });
+  }
+
+  res.json({ ok: true });
+});
+
+// GET /api/subagents/:id/auth/status — Check auth status
+router.get("/:id/auth/status", async (req, res) => {
+  const s = getSubagent(req.params.id);
+  if (!s) return res.status(404).json({ error: "Subagent not found" });
+
+  if (s.claudeAuth.mode === "host-spawned") {
+    return res.json({ mode: "host-spawned", authenticated: true });
+  }
+
+  const home = getSubagentClaudeHome(s.id);
+  const credPath = join(home, ".claude", ".credentials.json");
+
+  if (!existsSync(credPath)) {
+    return res.json({ mode: "oauth", authenticated: false });
+  }
+
+  try {
+    const { stdout } = await execFileAsync("claude", ["auth", "status"], {
+      env: { ...process.env, HOME: home },
+      timeout: 10_000,
+    });
+    const loggedIn = stdout.includes("Logged in") || stdout.includes("loggedIn");
+    res.json({ mode: "oauth", authenticated: loggedIn, raw: stdout.trim() });
+  } catch {
+    // Credentials file exists but auth check failed — might be expired
+    res.json({ mode: "oauth", authenticated: false, hasCredentials: true });
+  }
+});
+
+// POST /api/subagents/:id/auth/logout — Logout
+router.post("/:id/auth/logout", async (req, res) => {
+  const s = getSubagent(req.params.id);
+  if (!s) return res.status(404).json({ error: "Subagent not found" });
+
+  const home = getSubagentClaudeHome(s.id);
+  try {
+    await execFileAsync("claude", ["auth", "logout"], {
+      env: { ...process.env, HOME: home },
+      timeout: 10_000,
+    });
+  } catch { /* may already be logged out */ }
+
+  // Also remove credentials file
+  const credPath = join(home, ".claude", ".credentials.json");
+  if (existsSync(credPath)) {
+    const { unlinkSync } = await import("fs");
+    try { unlinkSync(credPath); } catch { /* ignore */ }
+  }
+
+  res.json({ ok: true });
 });
 
 export default router;
