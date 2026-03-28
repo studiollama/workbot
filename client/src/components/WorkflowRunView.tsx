@@ -48,10 +48,10 @@ export default function WorkflowRunView({ workflowId, runId, onBack }: Props) {
 
   useEffect(() => { fetchRun(); }, [fetchRun]);
 
-  // Auto-refresh while running
+  // Auto-refresh while running (1s for responsive live view)
   useEffect(() => {
     if (!run || run.status !== "running") return;
-    const id = setInterval(fetchRun, 2000);
+    const id = setInterval(fetchRun, 1000);
     return () => clearInterval(id);
   }, [run?.status, fetchRun]);
 

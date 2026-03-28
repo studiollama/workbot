@@ -155,14 +155,29 @@ export default function WorkflowDagView({ nodes, edges, nodeStatuses, onNodeClic
               />
               {/* Status dot */}
               <circle cx={pos.x + 12} cy={pos.y + nodeH / 2} r={4}
-                className={STATUS_DOTS[status]} fill={
+                fill={
                   status === "running" ? "#3b82f6" :
                   status === "completed" ? "#22c55e" :
                   status === "failed" ? "#ef4444" :
                   status === "skipped" ? "#eab308" : "#6b7280"
-                } />
+                }>
+                {status === "running" && (
+                  <animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite" />
+                )}
+              </circle>
+              {/* Pulse ring for running nodes */}
+              {status === "running" && (
+                <circle cx={pos.x + 12} cy={pos.y + nodeH / 2} r={4} fill="none" stroke="#3b82f6" strokeWidth={1.5}>
+                  <animate attributeName="r" values="4;10" dur="1.2s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.8;0" dur="1.2s" repeatCount="indefinite" />
+                </circle>
+              )}
+              {/* Error icon for failed nodes */}
+              {status === "failed" && (
+                <text x={pos.x + nodeW - 16} y={pos.y + 16} fill="#ef4444" fontSize={12} textAnchor="middle">!</text>
+              )}
               {/* Label */}
-              <text x={pos.x + 22} y={pos.y + nodeH / 2 - 4} fill="#e5e7eb" fontSize={11} fontFamily="monospace">
+              <text x={pos.x + 22} y={pos.y + nodeH / 2 - 4} fill={isSelected ? "#fff" : "#e5e7eb"} fontSize={11} fontFamily="monospace" fontWeight={isSelected ? "bold" : "normal"}>
                 {node.label.length > 14 ? node.label.slice(0, 12) + ".." : node.label}
               </text>
               {/* Type badge */}
