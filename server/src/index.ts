@@ -19,6 +19,7 @@ import skillsRoutes from "./routes/skills.js";
 import dashboardAuthRoutes from "./routes/dashboard-auth.js";
 import logsRoutes from "./routes/logs.js";
 import workflowRoutes from "./routes/workflows.js";
+import subagentRoutes from "./routes/subagents.js";
 import { loadMcpConfig, saveMcpConfig } from "./mcp-config.js";
 import { ensureCerts } from "./certs.js";
 import { requireAuth } from "./middleware/requireAuth.js";
@@ -125,6 +126,7 @@ app.post("/api/workflows/:id/trigger/:webhookId", (req, res, next) => {
   res.json({ runId: run.runId, status: run.status });
 });
 app.use("/api/workflows", requireAuth, workflowRoutes);
+app.use("/api/subagents", requireAuth, subagentRoutes);
 
 // Clean up stale active key from previous crash
 deleteActiveKey();

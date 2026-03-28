@@ -826,7 +826,95 @@ loggedTool(
   }
 );
 
+// ── Subagent tools ────────────────────────────────────────────────────
+
+import { loadSubagents, getSubagent as getSubagentDef, createSubagent as createSubagentDef, updateSubagent as updateSubagentDef, deleteSubagent as deleteSubagentDef } from "./subagents.js";
+
+loggedTool(
+  "subagent_list",
+  "List all subagents with their names, allowed services, and status.",
+  {},
+  async () => {
+    const subagents = loadSubagents();
+    if (subagents.length === 0) return { content: [{ type: "text", text: "No subagents defined." }] };
+    const lines = subagents.map((s) => {
+      const services = s.allowedServices.length > 0 ? s.allowedServices.join(", ") : "none";
+      return `${s.enabled ? "+" : "-"} ${s.name} (${s.id}) — services: [${services}] — ${s.claudeAuth.mode}`;
+    });
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  }
+);
+
+loggedTool(
+  "subagent_create",
+  "Create a new subagent with its own isolated brain. Returns the created definition.",
+  {
+    name: z.string().describe("Subagent name (e.g. 'Email Handler')"),
+    description: z.string().optional().describe("What this subagent does"),
+    allowedServices: z.string().optional().describe("JSON array of service keys this subagent can access, e.g. '[\"gmail\",\"github\"]'"),
+  },
+  async ({ name, description, allowedServices: servicesJson }) => {
+    try {
+      const services = servicesJson ? JSON.parse(servicesJson) : [];
+      const s = createSubagentDef({ name, description, allowedServices: services });
+      return { content: [{ type: "text", text: `Created subagent "${s.id}" with brain at workbot-brain/${s.brainPath}/\nAllowed services: ${s.allowedServices.join(", ") || "none"}` }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+loggedTool(
+  "subagent_update",
+  "Update a subagent's configuration.",
+  {
+    subagentId: z.string().describe("Subagent ID"),
+    name: z.string().optional(),
+    description: z.string().optional(),
+    enabled: z.boolean().optional(),
+    allowedServices: z.string().optional().describe("JSON array of service keys"),
+  },
+  async ({ subagentId, name, description, enabled, allowedServices: servicesJson }) => {
+    try {
+      const updates: any = {};
+      if (name !== undefined) updates.name = name;
+      if (description !== undefined) updates.description = description;
+      if (enabled !== undefined) updates.enabled = enabled;
+      if (servicesJson !== undefined) updates.allowedServices = JSON.parse(servicesJson);
+      const s = updateSubagentDef(subagentId, updates);
+      return { content: [{ type: "text", text: `Updated subagent "${s.id}". Enabled: ${s.enabled}, services: [${s.allowedServices.join(", ")}]` }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+loggedTool(
+  "subagent_delete",
+  "Delete a subagent. Optionally deletes its brain directory.",
+  {
+    subagentId: z.string().describe("Subagent ID"),
+    deleteBrain: z.boolean().optional().describe("Also delete the brain directory (default: false)"),
+  },
+  async ({ subagentId, deleteBrain }) => {
+    if (!deleteSubagentDef(subagentId, deleteBrain)) {
+      return { content: [{ type: "text", text: `Subagent "${subagentId}" not found.` }], isError: true };
+    }
+    return { content: [{ type: "text", text: `Deleted subagent "${subagentId}".${deleteBrain ? " Brain directory removed." : ""}` }] };
+  }
+);
+
 // ── Start ───────────────────────────────────────────────────────────────
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// Check for subagent mode (--subagent <id>)
+const cliArgs = process.argv.slice(2);
+const subagentFlagIdx = cliArgs.indexOf("--subagent");
+if (subagentFlagIdx !== -1 && cliArgs[subagentFlagIdx + 1]) {
+  // Start subagent-scoped MCP server instead of host server
+  const { createSubagentMcpServer } = await import("./subagent-mcp.js");
+  await createSubagentMcpServer(cliArgs[subagentFlagIdx + 1]);
+} else {
+  // Host MCP server (normal mode)
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}

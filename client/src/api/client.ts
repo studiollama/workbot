@@ -304,6 +304,23 @@ export const api = {
   dashboardLogout: () =>
     request<{ ok: boolean }>("/dashboard-auth/logout", { method: "POST" }),
 
+  // Subagents
+  getSubagents: () => request<any[]>("/subagents"),
+  getSubagent: (id: string) => request<any>(`/subagents/${id}`),
+  createSubagent: (data: { name: string; description?: string; allowedServices?: string[] }) =>
+    request<any>("/subagents", { method: "POST", body: JSON.stringify(data) }),
+  updateSubagent: (id: string, data: any) =>
+    request<any>(`/subagents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteSubagent: (id: string) =>
+    request<{ ok: boolean }>(`/subagents/${id}`, { method: "DELETE" }),
+  spawnSubagent: (id: string, prompt?: string) =>
+    request<{ sessionId: string; pid: number }>(`/subagents/${id}/spawn`, {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
+    }),
+  getSubagentServices: (id: string) =>
+    request<Record<string, { connected: boolean; user?: string; allowed: boolean }>>(`/subagents/${id}/services`),
+
   // Workflows
   getWorkflows: () => request<any[]>("/workflows"),
   getWorkflow: (id: string) => request<any>(`/workflows/${id}`),

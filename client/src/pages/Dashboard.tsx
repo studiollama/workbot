@@ -8,6 +8,7 @@ import DevPanel from "../components/DevPanel";
 import SkillsPanel from "../components/SkillsPanel";
 import LogsPanel from "../components/LogsPanel";
 import WorkflowsPanel from "../components/WorkflowsPanel";
+import SubagentsPanel from "../components/SubagentsPanel";
 
 const SERVICE_ICONS: Record<string, string> = {
   github: "GH",
@@ -46,7 +47,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
     useServices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills" | "logs" | "workflows">("services");
+  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills" | "logs" | "workflows" | "subagents">("services");
 
   if (loading) {
     return (
@@ -147,6 +148,16 @@ export default function Dashboard({ onLogout }: DashboardProps) {
             Workflows
           </button>
           <button
+            onClick={() => setActiveTab("subagents")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              activeTab === "subagents"
+                ? "border-accent-500 text-theme-primary"
+                : "border-transparent text-theme-secondary hover:text-theme-primary"
+            }`}
+          >
+            Subagents
+          </button>
+          <button
             onClick={() => setActiveTab("logs")}
             className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
               activeTab === "logs"
@@ -162,6 +173,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
         {activeTab === "development" && <DevPanel />}
         {activeTab === "skills" && <SkillsPanel />}
         {activeTab === "workflows" && <WorkflowsPanel />}
+        {activeTab === "subagents" && <SubagentsPanel />}
         {activeTab === "logs" && <LogsPanel />}
 
         {activeTab === "services" && (() => {

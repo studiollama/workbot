@@ -212,7 +212,7 @@ export default function WorkflowEditor({ workflowId, onSave, onCancel }: Props) 
             </div>
 
             {editingNode === node.id && (
-              <NodeConfigEditor node={node} onChange={(updates) => updateNode(node.id, updates)} />
+              <NodeConfigEditor node={node} allNodes={data.nodes} onChange={(updates) => updateNode(node.id, updates)} />
             )}
           </div>
         ))}
@@ -251,7 +251,7 @@ export default function WorkflowEditor({ workflowId, onSave, onCancel }: Props) 
   );
 }
 
-function NodeConfigEditor({ node, onChange }: { node: TaskNode; onChange: (updates: Partial<TaskNode>) => void }) {
+function NodeConfigEditor({ node, allNodes, onChange }: { node: TaskNode; allNodes: TaskNode[]; onChange: (updates: Partial<TaskNode>) => void }) {
   return (
     <div className="space-y-2 pt-2 border-t border-theme/50">
       <div>
@@ -330,7 +330,7 @@ function NodeConfigEditor({ node, onChange }: { node: TaskNode; onChange: (updat
             <select value={node.config.useNodeOutput ?? ""} onChange={(e) => onChange({ config: { ...node.config, useNodeOutput: e.target.value } })}
               className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none">
               <option value="">None (use static content below)</option>
-              {data.nodes.filter((n) => n.id !== node.id).map((n) => (
+              {allNodes.filter((n) => n.id !== node.id).map((n) => (
                 <option key={n.id} value={n.id}>{n.label} ({n.id})</option>
               ))}
             </select>

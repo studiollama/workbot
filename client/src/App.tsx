@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { Routes, Route } from "react-router-dom";
 import { api } from "./api/client";
 import { ServicesProvider } from "./context/ServicesContext";
 import Dashboard from "./pages/Dashboard";
 import LoginPage from "./pages/LoginPage";
 import SetupPage from "./pages/SetupPage";
+import SubagentDashboard from "./pages/SubagentDashboard";
 
 type AuthState = "loading" | "setup" | "login" | "authenticated";
 
@@ -51,9 +53,18 @@ export default function App() {
     return <LoginPage onLogin={() => setAuthState("authenticated")} />;
   }
 
+  const handleLogout = () => setAuthState("login");
+
   return (
-    <ServicesProvider>
-      <Dashboard onLogout={() => setAuthState("login")} />
-    </ServicesProvider>
+    <Routes>
+      <Route path="/" element={
+        <ServicesProvider>
+          <Dashboard onLogout={handleLogout} />
+        </ServicesProvider>
+      } />
+      <Route path="/subagent/:id" element={
+        <SubagentDashboard onLogout={handleLogout} />
+      } />
+    </Routes>
   );
 }
