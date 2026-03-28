@@ -39,7 +39,7 @@ function loggedTool(
   schema: Record<string, z.ZodTypeAny>,
   handler: (args: any) => Promise<any>
 ) {
-  loggedTool(name, description, schema, async (args: any) => {
+  server.tool(name, description, schema, async (args: any) => {
     const start = Date.now();
     try {
       const result = await handler(args);
