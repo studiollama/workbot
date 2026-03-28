@@ -88,6 +88,25 @@ export function createSubagent(input: {
   // Create QMD index directory
   mkdirSync(qmdIndexDir, { recursive: true });
 
+  // Trust the subagent brain directory for Claude Code
+  // Running a trivial -p command with bypassPermissions auto-trusts the dir
+  const brainDir = join(BRAIN_ROOT, brainPath);
+  try {
+    const { execFileSync } = require("child_process");
+    const trustEnv: Record<string, string> = { ...process.env as any };
+    if (subagent.claudeAuth.mode === "oauth") {
+      trustEnv.HOME = getSubagentClaudeHome(id);
+    }
+    execFileSync("claude", ["-p", "hello", "--permission-mode", "bypassPermissions"], {
+      cwd: brainDir,
+      timeout: 30_000,
+      stdio: "pipe",
+      env: trustEnv,
+    });
+  } catch {
+    // Non-fatal — trust will happen on first spawn
+  }
+
   // Save
   const all = loadSubagents();
   all.push(subagent);

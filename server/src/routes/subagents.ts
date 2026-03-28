@@ -110,21 +110,23 @@ router.post("/:id/spawn", (req, res) => {
     }
   }
 
-  // Spawn Claude CLI with subagent-scoped MCP
-  const mcpServerCmd = `node ${resolve(PROJECT_ROOT, "node_modules/tsx/dist/cli.mjs")} ${resolve(PROJECT_ROOT, "server/src/mcp.ts")} --subagent ${s.id}`;
-  const prompt = req.body.prompt;
-
-  const args = prompt
-    ? ["-p", prompt, "--permission-mode", "bypassPermissions"]
-    : ["--permission-mode", "bypassPermissions"];
-
-  // Set cwd to subagent brain for context
+  // Spawn Claude remote-control session for this subagent
   const cwd = resolve(PROJECT_ROOT, "workbot-brain", "subagents", s.id);
+
+  const args = [
+    "remote-control",
+    "--name", s.name,
+    "--spawn", "same-dir",
+    "--verbose",
+  ];
+
+  // Add permission mode if requested (default: bypassPermissions)
+  const permissionMode = req.body.permissionMode ?? "bypassPermissions";
+  args.push("--permission-mode", permissionMode);
 
   // Set HOME for oauth mode so Claude uses subagent-specific credentials
   const spawnEnv: Record<string, string> = {
     ...process.env as Record<string, string>,
-    MCP_SERVER_CMD: mcpServerCmd,
   };
   if (s.claudeAuth.mode === "oauth") {
     spawnEnv.HOME = getSubagentClaudeHome(s.id);
