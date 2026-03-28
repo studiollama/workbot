@@ -13,6 +13,30 @@ const LOG_DIR = join(STORE_DIR, "logs");
 const LOG_PATH = join(LOG_DIR, "mcp-tools.jsonl");
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 
+// Keys whose values should always be fully redacted
+const REDACT_KEYS = new Set([
+  "token", "password", "secret", "key", "apiKey", "api_key",
+  "client_secret", "refresh_token", "access_token", "authorization",
+]);
+
+// Patterns that indicate a value is a secret (even if the key name is generic)
+const SECRET_PATTERNS = [
+  /^ghp_/,          // GitHub PAT
+  /^gho_/,          // GitHub OAuth
+  /^github_pat_/,   // GitHub fine-grained PAT
+  /^sk[-_]/,        // Stripe, OpenAI, etc.
+  /^pk[-_]/,        // Stripe publishable
+  /^pat[A-Za-z0-9]/, // Airtable PAT
+  /^xox[bpas]-/,    // Slack tokens
+  /^AIza/,          // Google API keys
+  /^ya29\./,        // Google OAuth access tokens
+  /^Bearer /i,      // Auth headers
+  /^Basic /i,       // Auth headers
+  /^GOCSPX-/,       // Google OAuth client secrets
+  /^rnd_/,          // Render API keys
+  /^sbp_/,          // Supabase keys
+];
+
 export interface LogEntry {
   timestamp: string;
   tool: string;
@@ -20,17 +44,40 @@ export interface LogEntry {
   duration_ms?: number;
 }
 
-function summarizeArgs(args: Record<string, unknown>): Record<string, unknown> {
-  const summary: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(args)) {
-    if (typeof v === "string") {
-      const maxLen = k === "content" ? 50 : 100;
-      summary[k] = v.length > maxLen ? v.slice(0, maxLen) + "..." : v;
-    } else {
-      summary[k] = v;
+function looksLikeSecret(value: string): boolean {
+  return SECRET_PATTERNS.some((p) => p.test(value));
+}
+
+function redactValue(key: string, value: unknown): unknown {
+  if (typeof value === "string") {
+    // Redact by key name
+    if (REDACT_KEYS.has(key.toLowerCase())) {
+      return "[REDACTED]";
     }
+    // Redact by value pattern
+    if (looksLikeSecret(value)) {
+      return "[REDACTED]";
+    }
+    // Truncate long strings (content, body, etc.)
+    const maxLen = key === "content" ? 50 : 100;
+    return value.length > maxLen ? value.slice(0, maxLen) + "..." : value;
   }
-  return summary;
+  if (typeof value === "object" && value !== null) {
+    return redactObject(value as Record<string, unknown>);
+  }
+  return value;
+}
+
+function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    result[k] = redactValue(k, v);
+  }
+  return result;
+}
+
+function summarizeArgs(args: Record<string, unknown>): Record<string, unknown> {
+  return redactObject(args);
 }
 
 export function logToolCall(
