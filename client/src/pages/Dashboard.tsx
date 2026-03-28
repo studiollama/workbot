@@ -7,6 +7,7 @@ import McpPanel from "../components/McpPanel";
 import DevPanel from "../components/DevPanel";
 import SkillsPanel from "../components/SkillsPanel";
 import LogsPanel from "../components/LogsPanel";
+import WorkflowsPanel from "../components/WorkflowsPanel";
 
 const SERVICE_ICONS: Record<string, string> = {
   github: "GH",
@@ -45,7 +46,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
     useServices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills" | "logs">("services");
+  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills" | "logs" | "workflows">("services");
 
   if (loading) {
     return (
@@ -136,6 +137,16 @@ export default function Dashboard({ onLogout }: DashboardProps) {
             Skills
           </button>
           <button
+            onClick={() => setActiveTab("workflows")}
+            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              activeTab === "workflows"
+                ? "border-accent-500 text-theme-primary"
+                : "border-transparent text-theme-secondary hover:text-theme-primary"
+            }`}
+          >
+            Workflows
+          </button>
+          <button
             onClick={() => setActiveTab("logs")}
             className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
               activeTab === "logs"
@@ -150,6 +161,7 @@ export default function Dashboard({ onLogout }: DashboardProps) {
         {activeTab === "mcp" && <McpPanel />}
         {activeTab === "development" && <DevPanel />}
         {activeTab === "skills" && <SkillsPanel />}
+        {activeTab === "workflows" && <WorkflowsPanel />}
         {activeTab === "logs" && <LogsPanel />}
 
         {activeTab === "services" && (() => {

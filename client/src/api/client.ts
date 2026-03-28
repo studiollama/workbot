@@ -304,6 +304,20 @@ export const api = {
   dashboardLogout: () =>
     request<{ ok: boolean }>("/dashboard-auth/logout", { method: "POST" }),
 
+  // Workflows
+  getWorkflows: () => request<any[]>("/workflows"),
+  getWorkflow: (id: string) => request<any>(`/workflows/${id}`),
+  createWorkflow: (data: any) => request<any>("/workflows", { method: "POST", body: JSON.stringify(data) }),
+  updateWorkflow: (id: string, data: any) => request<any>(`/workflows/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteWorkflow: (id: string) => request<{ ok: boolean }>(`/workflows/${id}`, { method: "DELETE" }),
+  toggleWorkflow: (id: string) => request<{ ok: boolean; enabled: boolean }>(`/workflows/${id}/toggle`, { method: "PUT" }),
+  triggerWorkflow: (id: string, triggerData?: any) =>
+    request<{ runId: string; status: string }>(`/workflows/${id}/run`, { method: "POST", body: JSON.stringify({ triggerData }) }),
+  getWorkflowRuns: (id: string) => request<any[]>(`/workflows/${id}/runs`),
+  getWorkflowRun: (workflowId: string, runId: string) => request<any>(`/workflows/${workflowId}/runs/${runId}`),
+  cancelWorkflowRun: (workflowId: string, runId: string) =>
+    request<{ ok: boolean }>(`/workflows/${workflowId}/runs/${runId}/cancel`, { method: "POST" }),
+
   // Logs
   getMcpLogs: (params?: { limit?: number; offset?: number; tool?: string }) => {
     const q = new URLSearchParams();

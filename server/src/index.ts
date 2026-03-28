@@ -18,11 +18,13 @@ import devRoutes from "./routes/development.js";
 import skillsRoutes from "./routes/skills.js";
 import dashboardAuthRoutes from "./routes/dashboard-auth.js";
 import logsRoutes from "./routes/logs.js";
+import workflowRoutes from "./routes/workflows.js";
 import { loadMcpConfig, saveMcpConfig } from "./mcp-config.js";
 import { ensureCerts } from "./certs.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { deleteActiveKey } from "./crypto.js";
 import { STORE_DIR } from "./paths.js";
+import { WorkflowEngine } from "./workflow-engine.js";
 
 // Bootstrap gitignored config files with defaults for fresh clones
 function ensureDefaults() {
@@ -115,6 +117,14 @@ app.use("/api/mcp", requireAuth, mcpRoutes);
 app.use("/api/dev", requireAuth, devRoutes);
 app.use("/api/skills", requireAuth, skillsRoutes);
 app.use("/api/logs", requireAuth, logsRoutes);
+// Webhook triggers bypass auth (validated by webhook ID) — must be before requireAuth
+app.post("/api/workflows/:id/trigger/:webhookId", (req, res, next) => {
+  const engine = req.app.get("workflowEngine");
+  const run = engine.handleWebhook(req.params.id, req.params.webhookId, req.body);
+  if (!run) return res.status(404).json({ error: "Invalid webhook" });
+  res.json({ runId: run.runId, status: run.status });
+});
+app.use("/api/workflows", requireAuth, workflowRoutes);
 
 // Clean up stale active key from previous crash
 deleteActiveKey();
@@ -134,8 +144,14 @@ server.listen(PORT, () => {
 app.set("server", server);
 app.set("actualPort", PORT);
 
+// Start workflow engine
+const workflowEngine = new WorkflowEngine();
+workflowEngine.start();
+app.set("workflowEngine", workflowEngine);
+
 // Clean up active key on shutdown
 function cleanup() {
+  workflowEngine.stop();
   deleteActiveKey();
 }
 process.on("SIGINT", () => { cleanup(); process.exit(0); });

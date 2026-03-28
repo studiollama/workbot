@@ -638,6 +638,96 @@ loggedTool(
   }
 );
 
+// ── Workflow tools ────────────────────────────────────────────────────
+
+import { loadWorkflows, loadRuns, getRun } from "./workflows-config.js";
+import { WorkflowEngine } from "./workflow-engine.js";
+
+const workflowEngine = new WorkflowEngine();
+workflowEngine.start();
+
+loggedTool(
+  "workflow_list",
+  "List all workflows with their status and last run info.",
+  {},
+  async () => {
+    const workflows = loadWorkflows();
+    const runs = loadRuns({ limit: 100 });
+    const lines: string[] = [];
+    for (const wf of workflows) {
+      const lastRun = runs.find((r) => r.workflowId === wf.id);
+      const schedule = wf.schedule?.cron ? ` [cron: ${wf.schedule.cron}]` : "";
+      const status = lastRun ? ` (last: ${lastRun.status} at ${lastRun.startedAt})` : "";
+      lines.push(`${wf.enabled ? "+" : "-"} ${wf.name} (${wf.id})${schedule}${status}`);
+    }
+    return {
+      content: [{ type: "text", text: lines.length > 0 ? lines.join("\n") : "No workflows defined." }],
+    };
+  }
+);
+
+loggedTool(
+  "workflow_run",
+  "Trigger a workflow by ID. Returns the run ID for status tracking.",
+  {
+    workflowId: z.string().describe("Workflow ID to trigger"),
+    triggerData: z.string().optional().describe("Optional JSON trigger data"),
+  },
+  async ({ workflowId, triggerData }) => {
+    try {
+      const data = triggerData ? JSON.parse(triggerData) : undefined;
+      const run = workflowEngine.executeWorkflow(workflowId, "mcp", data);
+      return {
+        content: [{ type: "text", text: `Started run ${run.runId} for workflow "${workflowId}".\nStatus: ${run.status}` }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: "text", text: `Failed to run workflow: ${err.message}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+loggedTool(
+  "workflow_status",
+  "Get the status of a workflow run. If no runId, shows the latest run.",
+  {
+    workflowId: z.string().describe("Workflow ID"),
+    runId: z.string().optional().describe("Specific run ID. If omitted, shows latest."),
+  },
+  async ({ workflowId, runId }) => {
+    let run;
+    if (runId) {
+      run = workflowEngine.getActiveRun(runId) ?? getRun(runId);
+    } else {
+      const runs = loadRuns({ workflowId, limit: 1 });
+      run = runs[0] ? (workflowEngine.getActiveRun(runs[0].runId) ?? runs[0]) : null;
+    }
+
+    if (!run) {
+      return { content: [{ type: "text", text: `No runs found for workflow "${workflowId}".` }] };
+    }
+
+    const lines = [
+      `Run: ${run.runId}`,
+      `Status: ${run.status}`,
+      `Trigger: ${run.trigger}`,
+      `Started: ${run.startedAt}`,
+      run.completedAt ? `Completed: ${run.completedAt}` : "",
+      "",
+      "Nodes:",
+    ];
+    for (const [nodeId, nr] of Object.entries(run.nodeResults)) {
+      const dur = nr.durationMs ? ` (${nr.durationMs}ms)` : "";
+      const err = nr.error ? ` — ${nr.error.slice(0, 100)}` : "";
+      lines.push(`  ${nr.status === "completed" ? "+" : nr.status === "failed" ? "x" : nr.status === "running" ? "~" : "-"} ${nodeId}: ${nr.status}${dur}${err}`);
+    }
+
+    return { content: [{ type: "text", text: lines.filter(Boolean).join("\n") }] };
+  }
+);
+
 // ── Start ───────────────────────────────────────────────────────────────
 
 const transport = new StdioServerTransport();
