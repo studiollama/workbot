@@ -153,8 +153,8 @@ export default function SubagentDashboard({ onLogout }: Props) {
         )}
 
         {activeTab === "mcp" && <McpPanel />}
-        {activeTab === "workflows" && <WorkflowsPanel />}
-        {activeTab === "logs" && <LogsPanel />}
+        {activeTab === "workflows" && <WorkflowsPanel scope={id} />}
+        {activeTab === "logs" && <LogsPanel scope={id} />}
       </div>
     </div>
   );

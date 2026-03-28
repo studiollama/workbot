@@ -12,6 +12,17 @@ import {
 import { SERVICES, loadStore } from "../services.js";
 import { readLogs } from "../mcp-logger.js";
 import { PROJECT_ROOT } from "../paths.js";
+import {
+  loadWorkflows,
+  getWorkflow as getWf,
+  upsertWorkflow,
+  deleteWorkflow as removeWorkflow,
+  loadRuns,
+  getRun,
+  type WorkflowDefinition,
+} from "../workflows-config.js";
+import { randomUUID } from "crypto";
+import cron from "node-cron";
 
 const router = Router();
 
@@ -160,6 +171,100 @@ router.get("/:id/logs", (req, res) => {
   const sliced = filtered.slice(offset, offset + limit);
 
   res.json({ entries: sliced, total: filtered.length });
+});
+
+// ── Subagent-scoped Workflow Routes ─────────────────────────────────────
+
+// GET /api/subagents/:id/workflows
+router.get("/:id/workflows", (req, res) => {
+  const scope = req.params.id;
+  const workflows = loadWorkflows(scope);
+  const runs = loadRuns({ limit: 200, scope });
+  const result = workflows.map((wf) => {
+    const wfRuns = runs.filter((r) => r.workflowId === wf.id);
+    const lastRun = wfRuns[0] ?? null;
+    return {
+      ...wf,
+      lastRun: lastRun ? { runId: lastRun.runId, status: lastRun.status, trigger: lastRun.trigger, startedAt: lastRun.startedAt, completedAt: lastRun.completedAt } : null,
+      nextRun: null, // TODO: compute from cron
+    };
+  });
+  res.json(result);
+});
+
+// POST /api/subagents/:id/workflows
+router.post("/:id/workflows", (req, res) => {
+  const scope = req.params.id;
+  const { name, description, schedule, triggers, nodes, edges } = req.body;
+  if (!name) return res.status(400).json({ error: "Name is required" });
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || randomUUID().slice(0, 8);
+  if (getWf(id, scope)) return res.status(409).json({ error: `Workflow "${id}" already exists` });
+  const now = new Date().toISOString();
+  const wf: WorkflowDefinition = { id, name, description: description ?? "", enabled: false, createdAt: now, updatedAt: now, schedule, triggers, nodes: nodes ?? [], edges: edges ?? [] };
+  upsertWorkflow(wf, scope);
+  res.status(201).json(wf);
+});
+
+// GET /api/subagents/:id/workflows/:wfId
+router.get("/:id/workflows/:wfId", (req, res) => {
+  const wf = getWf(req.params.wfId, req.params.id);
+  if (!wf) return res.status(404).json({ error: "Workflow not found" });
+  const runs = loadRuns({ workflowId: wf.id, limit: 20, scope: req.params.id });
+  res.json({ ...wf, runs });
+});
+
+// PUT /api/subagents/:id/workflows/:wfId
+router.put("/:id/workflows/:wfId", (req, res) => {
+  const scope = req.params.id;
+  const existing = getWf(req.params.wfId, scope);
+  if (!existing) return res.status(404).json({ error: "Workflow not found" });
+  const updated = { ...existing, ...req.body, id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString() };
+  upsertWorkflow(updated, scope);
+  res.json(updated);
+});
+
+// DELETE /api/subagents/:id/workflows/:wfId
+router.delete("/:id/workflows/:wfId", (req, res) => {
+  if (!removeWorkflow(req.params.wfId, req.params.id)) return res.status(404).json({ error: "Workflow not found" });
+  res.json({ ok: true });
+});
+
+// PUT /api/subagents/:id/workflows/:wfId/toggle
+router.put("/:id/workflows/:wfId/toggle", (req, res) => {
+  const scope = req.params.id;
+  const existing = getWf(req.params.wfId, scope);
+  if (!existing) return res.status(404).json({ error: "Workflow not found" });
+  existing.enabled = !existing.enabled;
+  existing.updatedAt = new Date().toISOString();
+  upsertWorkflow(existing, scope);
+  res.json({ ok: true, enabled: existing.enabled });
+});
+
+// POST /api/subagents/:id/workflows/:wfId/run
+router.post("/:id/workflows/:wfId/run", (req, res) => {
+  const scope = req.params.id;
+  const wf = getWf(req.params.wfId, scope);
+  if (!wf) return res.status(404).json({ error: "Workflow not found" });
+  const engine = req.app.get("workflowEngine");
+  try {
+    const run = engine.executeWorkflow(wf.id, "manual", req.body.triggerData);
+    res.json({ runId: run.runId, status: run.status });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/subagents/:id/workflows/:wfId/runs
+router.get("/:id/workflows/:wfId/runs", (req, res) => {
+  const runs = loadRuns({ workflowId: req.params.wfId, limit: 20, scope: req.params.id });
+  res.json(runs);
+});
+
+// GET /api/subagents/:id/workflows/:wfId/runs/:runId
+router.get("/:id/workflows/:wfId/runs/:runId", (req, res) => {
+  const run = getRun(req.params.runId, req.params.id);
+  if (!run) return res.status(404).json({ error: "Run not found" });
+  res.json(run);
 });
 
 export default router;

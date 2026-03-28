@@ -30,6 +30,7 @@ interface WorkflowData {
 
 interface Props {
   workflowId?: string;
+  scope?: string;
   onSave: () => void;
   onCancel: () => void;
 }
@@ -41,7 +42,7 @@ const MCP_TOOLS = [
   "agents_read", "agents_write",
 ];
 
-export default function WorkflowEditor({ workflowId, onSave, onCancel }: Props) {
+export default function WorkflowEditor({ workflowId, scope, onSave, onCancel }: Props) {
   const [data, setData] = useState<WorkflowData>({
     name: "",
     description: "",
@@ -56,7 +57,7 @@ export default function WorkflowEditor({ workflowId, onSave, onCancel }: Props) 
 
   useEffect(() => {
     if (!workflowId) return;
-    api.getWorkflow(workflowId).then((wf) => {
+    api.getWorkflow(workflowId, scope).then((wf) => {
       setData(wf);
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -68,9 +69,9 @@ export default function WorkflowEditor({ workflowId, onSave, onCancel }: Props) 
     setError("");
     try {
       if (workflowId) {
-        await api.updateWorkflow(workflowId, data);
+        await api.updateWorkflow(workflowId, data, scope);
       } else {
-        await api.createWorkflow(data);
+        await api.createWorkflow(data, scope);
       }
       onSave();
     } catch (err: any) {

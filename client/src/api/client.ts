@@ -321,27 +321,28 @@ export const api = {
   getSubagentServices: (id: string) =>
     request<Record<string, { connected: boolean; user?: string; allowed: boolean }>>(`/subagents/${id}/services`),
 
-  // Workflows
-  getWorkflows: () => request<any[]>("/workflows"),
-  getWorkflow: (id: string) => request<any>(`/workflows/${id}`),
-  createWorkflow: (data: any) => request<any>("/workflows", { method: "POST", body: JSON.stringify(data) }),
-  updateWorkflow: (id: string, data: any) => request<any>(`/workflows/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteWorkflow: (id: string) => request<{ ok: boolean }>(`/workflows/${id}`, { method: "DELETE" }),
-  toggleWorkflow: (id: string) => request<{ ok: boolean; enabled: boolean }>(`/workflows/${id}/toggle`, { method: "PUT" }),
-  triggerWorkflow: (id: string, triggerData?: any) =>
-    request<{ runId: string; status: string }>(`/workflows/${id}/run`, { method: "POST", body: JSON.stringify({ triggerData }) }),
-  getWorkflowRuns: (id: string) => request<any[]>(`/workflows/${id}/runs`),
-  getWorkflowRun: (workflowId: string, runId: string) => request<any>(`/workflows/${workflowId}/runs/${runId}`),
-  cancelWorkflowRun: (workflowId: string, runId: string) =>
-    request<{ ok: boolean }>(`/workflows/${workflowId}/runs/${runId}/cancel`, { method: "POST" }),
+  // Workflows (scope = subagentId for scoped calls, undefined for host)
+  getWorkflows: (scope?: string) => request<any[]>(scope ? `/subagents/${scope}/workflows` : "/workflows"),
+  getWorkflow: (id: string, scope?: string) => request<any>(scope ? `/subagents/${scope}/workflows/${id}` : `/workflows/${id}`),
+  createWorkflow: (data: any, scope?: string) => request<any>(scope ? `/subagents/${scope}/workflows` : "/workflows", { method: "POST", body: JSON.stringify(data) }),
+  updateWorkflow: (id: string, data: any, scope?: string) => request<any>(scope ? `/subagents/${scope}/workflows/${id}` : `/workflows/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteWorkflow: (id: string, scope?: string) => request<{ ok: boolean }>(scope ? `/subagents/${scope}/workflows/${id}` : `/workflows/${id}`, { method: "DELETE" }),
+  toggleWorkflow: (id: string, scope?: string) => request<{ ok: boolean; enabled: boolean }>(scope ? `/subagents/${scope}/workflows/${id}/toggle` : `/workflows/${id}/toggle`, { method: "PUT" }),
+  triggerWorkflow: (id: string, triggerData?: any, scope?: string) =>
+    request<{ runId: string; status: string }>(scope ? `/subagents/${scope}/workflows/${id}/run` : `/workflows/${id}/run`, { method: "POST", body: JSON.stringify({ triggerData }) }),
+  getWorkflowRuns: (id: string, scope?: string) => request<any[]>(scope ? `/subagents/${scope}/workflows/${id}/runs` : `/workflows/${id}/runs`),
+  getWorkflowRun: (workflowId: string, runId: string, scope?: string) => request<any>(scope ? `/subagents/${scope}/workflows/${workflowId}/runs/${runId}` : `/workflows/${workflowId}/runs/${runId}`),
+  cancelWorkflowRun: (workflowId: string, runId: string, scope?: string) =>
+    request<{ ok: boolean }>(scope ? `/subagents/${scope}/workflows/${workflowId}/runs/${runId}/cancel` : `/workflows/${workflowId}/runs/${runId}/cancel`, { method: "POST" }),
 
-  // Logs
-  getMcpLogs: (params?: { limit?: number; offset?: number; tool?: string }) => {
+  // Logs (scope = subagentId for scoped calls)
+  getMcpLogs: (params?: { limit?: number; offset?: number; tool?: string; scope?: string }) => {
     const q = new URLSearchParams();
     if (params?.limit) q.set("limit", String(params.limit));
     if (params?.offset) q.set("offset", String(params.offset));
     if (params?.tool) q.set("tool", params.tool);
     const qs = q.toString();
-    return request<{ entries: any[]; total: number }>(`/logs/mcp${qs ? `?${qs}` : ""}`);
+    const base = params?.scope ? `/subagents/${params.scope}/logs` : "/logs/mcp";
+    return request<{ entries: any[]; total: number }>(`${base}${qs ? `?${qs}` : ""}`);
   },
 };

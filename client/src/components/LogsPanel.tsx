@@ -8,7 +8,7 @@ interface LogEntry {
   duration_ms?: number;
 }
 
-export default function LogsPanel() {
+export default function LogsPanel({ scope }: { scope?: string } = {}) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -25,7 +25,7 @@ export default function LogsPanel() {
   // Initial load + refresh (always fetches newest)
   const fetchLatest = useCallback(async () => {
     try {
-      const data = await api.getMcpLogs({ limit, offset: 0, tool: toolFilter || undefined });
+      const data = await api.getMcpLogs({ limit, offset: 0, tool: toolFilter || undefined, scope });
       setEntries(data.entries);
       setTotal(data.total);
       setHasMore(data.entries.length < data.total);
@@ -42,7 +42,7 @@ export default function LogsPanel() {
     setLoadingMore(true);
     try {
       const offset = entriesRef.current.length;
-      const data = await api.getMcpLogs({ limit, offset, tool: toolFilter || undefined });
+      const data = await api.getMcpLogs({ limit, offset, tool: toolFilter || undefined, scope });
       setEntries((prev) => [...prev, ...data.entries]);
       setTotal(data.total);
       setHasMore(offset + data.entries.length < data.total);

@@ -25,10 +25,11 @@ interface WorkflowRun {
 interface Props {
   workflowId: string;
   runId: string;
+  scope?: string;
   onBack: () => void;
 }
 
-export default function WorkflowRunView({ workflowId, runId, onBack }: Props) {
+export default function WorkflowRunView({ workflowId, runId, scope, onBack }: Props) {
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [workflow, setWorkflow] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -37,8 +38,8 @@ export default function WorkflowRunView({ workflowId, runId, onBack }: Props) {
   const fetchRun = useCallback(async () => {
     try {
       const [r, wf] = await Promise.all([
-        api.getWorkflowRun(workflowId, runId),
-        workflow ? Promise.resolve(workflow) : api.getWorkflow(workflowId),
+        api.getWorkflowRun(workflowId, runId, scope),
+        workflow ? Promise.resolve(workflow) : api.getWorkflow(workflowId, scope),
       ]);
       setRun(r);
       if (!workflow) setWorkflow(wf);
@@ -83,7 +84,7 @@ export default function WorkflowRunView({ workflowId, runId, onBack }: Props) {
         </div>
         {run.status === "running" && (
           <button
-            onClick={async () => { await api.cancelWorkflowRun(workflowId, runId); fetchRun(); }}
+            onClick={async () => { await api.cancelWorkflowRun(workflowId, runId, scope); fetchRun(); }}
             className="px-3 py-1 text-xs bg-red-900/50 hover:bg-red-900 text-red-300 rounded transition"
           >
             Cancel

@@ -28,7 +28,7 @@ type View =
   | { type: "run"; workflowId: string; runId: string }
   | { type: "history"; workflowId: string };
 
-export default function WorkflowsPanel() {
+export default function WorkflowsPanel({ scope }: { scope?: string } = {}) {
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -36,11 +36,11 @@ export default function WorkflowsPanel() {
 
   const fetchWorkflows = useCallback(async () => {
     try {
-      const data = await api.getWorkflows();
+      const data = await api.getWorkflows(scope);
       setWorkflows(data);
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  }, []);
+  }, [scope]);
 
   useEffect(() => { fetchWorkflows(); }, [fetchWorkflows]);
 
@@ -48,6 +48,7 @@ export default function WorkflowsPanel() {
     return (
       <WorkflowEditor
         workflowId={view.workflowId}
+        scope={scope}
         onSave={() => { setView({ type: "list" }); fetchWorkflows(); }}
         onCancel={() => setView({ type: "list" })}
       />
@@ -58,6 +59,7 @@ export default function WorkflowsPanel() {
     return (
       <WorkflowHistory
         workflowId={view.workflowId}
+        scope={scope}
         onViewRun={(runId) => setView({ type: "run", workflowId: view.workflowId, runId })}
         onBack={() => setView({ type: "list" })}
       />
@@ -69,6 +71,7 @@ export default function WorkflowsPanel() {
       <WorkflowRunView
         workflowId={view.workflowId}
         runId={view.runId}
+        scope={scope}
         onBack={() => setView({ type: "list" })}
       />
     );
@@ -116,20 +119,20 @@ export default function WorkflowsPanel() {
               onEdit={() => setView({ type: "editor", workflowId: wf.id })}
               onToggle={async () => {
                 try {
-                  await api.toggleWorkflow(wf.id);
+                  await api.toggleWorkflow(wf.id, scope);
                   fetchWorkflows();
                 } catch (err: any) { setError(err.message); }
               }}
               onRun={async () => {
                 try {
                   setError("");
-                  const { runId } = await api.triggerWorkflow(wf.id);
+                  const { runId } = await api.triggerWorkflow(wf.id, undefined, scope);
                   setView({ type: "run", workflowId: wf.id, runId });
                 } catch (err: any) { setError(err.message); }
               }}
               onDelete={async () => {
                 try {
-                  await api.deleteWorkflow(wf.id);
+                  await api.deleteWorkflow(wf.id, scope);
                   fetchWorkflows();
                 } catch (err: any) { setError(err.message); }
               }}
@@ -227,10 +230,12 @@ function WorkflowCard({
 
 function WorkflowHistory({
   workflowId,
+  scope,
   onViewRun,
   onBack,
 }: {
   workflowId: string;
+  scope?: string;
   onViewRun: (runId: string) => void;
   onBack: () => void;
 }) {
@@ -240,8 +245,8 @@ function WorkflowHistory({
 
   useEffect(() => {
     Promise.all([
-      api.getWorkflowRuns(workflowId),
-      api.getWorkflow(workflowId),
+      api.getWorkflowRuns(workflowId, scope),
+      api.getWorkflow(workflowId, scope),
     ]).then(([r, wf]) => {
       setRuns(r);
       setName(wf.name);

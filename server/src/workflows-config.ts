@@ -13,6 +13,15 @@ import { STORE_DIR } from "./paths.js";
 const WORKFLOWS_PATH = join(STORE_DIR, "workflows.json");
 const RUNS_DIR = join(STORE_DIR, "logs");
 const RUNS_PATH = join(RUNS_DIR, "workflow-runs.jsonl");
+
+/** Get scoped paths for subagent workflows/runs. Null scope = host. */
+export function getScopedPaths(scope?: string) {
+  if (!scope) return { workflowsPath: WORKFLOWS_PATH, runsPath: RUNS_PATH };
+  return {
+    workflowsPath: join(STORE_DIR, `workflows-${scope}.json`),
+    runsPath: join(RUNS_DIR, `workflow-runs-${scope}.jsonl`),
+  };
+}
 const MAX_RUNS_SIZE = 10 * 1024 * 1024; // 10MB
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -106,62 +115,65 @@ export interface WorkflowRun {
 
 // ── Workflow CRUD ──────────────────────────────────────────────────────
 
-export function loadWorkflows(): WorkflowDefinition[] {
+export function loadWorkflows(scope?: string): WorkflowDefinition[] {
+  const { workflowsPath } = getScopedPaths(scope);
   try {
-    if (!existsSync(WORKFLOWS_PATH)) return [];
-    return JSON.parse(readFileSync(WORKFLOWS_PATH, "utf-8"));
+    if (!existsSync(workflowsPath)) return [];
+    return JSON.parse(readFileSync(workflowsPath, "utf-8"));
   } catch {
     return [];
   }
 }
 
-export function saveWorkflows(workflows: WorkflowDefinition[]): void {
+export function saveWorkflows(workflows: WorkflowDefinition[], scope?: string): void {
+  const { workflowsPath } = getScopedPaths(scope);
   if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
-  writeFileSync(WORKFLOWS_PATH, JSON.stringify(workflows, null, 2));
+  writeFileSync(workflowsPath, JSON.stringify(workflows, null, 2));
 }
 
-export function getWorkflow(id: string): WorkflowDefinition | undefined {
-  return loadWorkflows().find((w) => w.id === id);
+export function getWorkflow(id: string, scope?: string): WorkflowDefinition | undefined {
+  return loadWorkflows(scope).find((w) => w.id === id);
 }
 
-export function upsertWorkflow(workflow: WorkflowDefinition): void {
-  const all = loadWorkflows();
+export function upsertWorkflow(workflow: WorkflowDefinition, scope?: string): void {
+  const all = loadWorkflows(scope);
   const idx = all.findIndex((w) => w.id === workflow.id);
   if (idx >= 0) {
     all[idx] = workflow;
   } else {
     all.push(workflow);
   }
-  saveWorkflows(all);
+  saveWorkflows(all, scope);
 }
 
-export function deleteWorkflow(id: string): boolean {
-  const all = loadWorkflows();
+export function deleteWorkflow(id: string, scope?: string): boolean {
+  const all = loadWorkflows(scope);
   const filtered = all.filter((w) => w.id !== id);
   if (filtered.length === all.length) return false;
-  saveWorkflows(filtered);
+  saveWorkflows(filtered, scope);
   return true;
 }
 
 // ── Run Persistence ────────────────────────────────────────────────────
 
-export function appendRun(run: WorkflowRun): void {
+export function appendRun(run: WorkflowRun, scope?: string): void {
+  const { runsPath } = getScopedPaths(scope);
   if (!existsSync(RUNS_DIR)) mkdirSync(RUNS_DIR, { recursive: true });
-  // Auto-rotate
   try {
-    if (existsSync(RUNS_PATH) && statSync(RUNS_PATH).size > MAX_RUNS_SIZE) {
-      renameSync(RUNS_PATH, RUNS_PATH + ".1");
+    if (existsSync(runsPath) && statSync(runsPath).size > MAX_RUNS_SIZE) {
+      renameSync(runsPath, runsPath + ".1");
     }
   } catch { /* ignore */ }
-  appendFileSync(RUNS_PATH, JSON.stringify(run) + "\n");
+  appendFileSync(runsPath, JSON.stringify(run) + "\n");
 }
 
-export function updateRun(run: WorkflowRun): void {
-  if (!existsSync(RUNS_PATH)) {
-    appendRun(run);
+export function updateRun(run: WorkflowRun, scope?: string): void {
+  const { runsPath } = getScopedPaths(scope);
+  if (!existsSync(runsPath)) {
+    appendRun(run, scope);
     return;
   }
-  const lines = readFileSync(RUNS_PATH, "utf-8").split("\n").filter((l) => l.trim());
+  const lines = readFileSync(runsPath, "utf-8").split("\n").filter((l) => l.trim());
   let found = false;
   const updated = lines.map((line) => {
     try {
@@ -174,16 +186,18 @@ export function updateRun(run: WorkflowRun): void {
     return line;
   });
   if (!found) updated.push(JSON.stringify(run));
-  writeFileSync(RUNS_PATH, updated.join("\n") + "\n");
+  writeFileSync(runsPath, updated.join("\n") + "\n");
 }
 
 export function loadRuns(opts?: {
   workflowId?: string;
   limit?: number;
+  scope?: string;
 }): WorkflowRun[] {
-  if (!existsSync(RUNS_PATH)) return [];
+  const { runsPath } = getScopedPaths(opts?.scope);
+  if (!existsSync(runsPath)) return [];
   const limit = opts?.limit ?? 50;
-  const lines = readFileSync(RUNS_PATH, "utf-8").split("\n").filter((l) => l.trim());
+  const lines = readFileSync(runsPath, "utf-8").split("\n").filter((l) => l.trim());
 
   const runs: WorkflowRun[] = [];
   for (let i = lines.length - 1; i >= 0 && runs.length < limit; i--) {
@@ -196,9 +210,10 @@ export function loadRuns(opts?: {
   return runs;
 }
 
-export function getRun(runId: string): WorkflowRun | undefined {
-  if (!existsSync(RUNS_PATH)) return undefined;
-  const lines = readFileSync(RUNS_PATH, "utf-8").split("\n").filter((l) => l.trim());
+export function getRun(runId: string, scope?: string): WorkflowRun | undefined {
+  const { runsPath } = getScopedPaths(scope);
+  if (!existsSync(runsPath)) return undefined;
+  const lines = readFileSync(runsPath, "utf-8").split("\n").filter((l) => l.trim());
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       const run: WorkflowRun = JSON.parse(lines[i]);
