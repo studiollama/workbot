@@ -486,16 +486,14 @@ export class WorkflowEngine {
   private async execClaudePrompt(config: ClaudePromptConfig): Promise<unknown> {
     try {
       const args = ["-p", config.prompt, "--output-format", "json"];
-      if (config.useProjectContext) {
-        const { PROJECT_ROOT } = await import("./paths.js");
-        args.push("--project-dir", PROJECT_ROOT);
-      }
       if (config.bypassPermissions) {
         args.push("--permission-mode", "bypassPermissions");
       }
+      const { PROJECT_ROOT } = await import("./paths.js");
       const { stdout } = await execFileAsync("claude", args, {
         timeout: 300_000, // 5 min for complex prompts
         maxBuffer: 10 * 1024 * 1024,
+        cwd: config.useProjectContext ? PROJECT_ROOT : undefined,
       });
 
       // Parse JSON output — contains full conversation with tool calls, thinking, etc.
