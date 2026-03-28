@@ -1,9 +1,11 @@
 import "dotenv/config";
 import express from "express";
+import https from "https";
 import session from "express-session";
 import cors from "cors";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { resolve, dirname } from "path";
+import { randomBytes } from "crypto";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,7 +16,13 @@ import servicesRoutes from "./routes/services.js";
 import mcpRoutes from "./routes/mcp.js";
 import devRoutes from "./routes/development.js";
 import skillsRoutes from "./routes/skills.js";
+import dashboardAuthRoutes from "./routes/dashboard-auth.js";
+import logsRoutes from "./routes/logs.js";
 import { loadMcpConfig, saveMcpConfig } from "./mcp-config.js";
+import { ensureCerts } from "./certs.js";
+import { requireAuth } from "./middleware/requireAuth.js";
+import { deleteActiveKey } from "./crypto.js";
+import { STORE_DIR } from "./paths.js";
 
 // Bootstrap gitignored config files with defaults for fresh clones
 function ensureDefaults() {
@@ -48,11 +56,27 @@ function ensureDefaults() {
 }
 ensureDefaults();
 
+// Persistent session secret — generate once, reuse across restarts
+function getSessionSecret(): string {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  const secretPath = resolve(STORE_DIR, ".session-secret");
+  if (existsSync(secretPath)) {
+    return readFileSync(secretPath, "utf-8").trim();
+  }
+  const secret = randomBytes(48).toString("hex");
+  if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
+  writeFileSync(secretPath, secret, { mode: 0o600 });
+  console.log("Generated persistent session secret");
+  return secret;
+}
+
 declare module "express-session" {
   interface SessionData {
     apiKey?: string;
     chatgptAuth?: boolean;
     org?: string | null;
+    authenticated?: boolean;
+    username?: string;
     [key: `svc_${string}`]: { token: string; user: string } | undefined;
   }
 }
@@ -68,29 +92,40 @@ app.use(cors({
 app.use(express.json());
 app.use(
   session({
-    secret: process.env.SESSION_SECRET ?? "dev-secret-change-me",
+    secret: getSessionSecret(),
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false, // dev only — set true behind HTTPS in prod
+      secure: true,
       httpOnly: true,
+      sameSite: "none",
       maxAge: 24 * 60 * 60 * 1000, // 24h
     },
   })
 );
 
-app.use("/api/auth", authRoutes);
-app.use("/api/codex", codexRoutes);
-app.use("/api/services", servicesRoutes);
-app.use("/api/mcp", mcpRoutes);
-app.use("/api/dev", devRoutes);
-app.use("/api/skills", skillsRoutes);
+// Public auth routes (no requireAuth)
+app.use("/api/dashboard-auth", dashboardAuthRoutes);
 
-const server = app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// All other routes require authentication
+app.use("/api/auth", requireAuth, authRoutes);
+app.use("/api/codex", requireAuth, codexRoutes);
+app.use("/api/services", requireAuth, servicesRoutes);
+app.use("/api/mcp", requireAuth, mcpRoutes);
+app.use("/api/dev", requireAuth, devRoutes);
+app.use("/api/skills", requireAuth, skillsRoutes);
+app.use("/api/logs", requireAuth, logsRoutes);
 
-  // Sync actual running port back to mcp.json so Settings UI, Vite proxy,
-  // and OAuth redirect URLs all use the correct port.
+// Clean up stale active key from previous crash
+deleteActiveKey();
+
+// HTTPS server
+const { key, cert } = await ensureCerts();
+const server = https.createServer({ key, cert }, app);
+server.listen(PORT, () => {
+  console.log(`Server running on https://localhost:${PORT}`);
+
+  // Sync actual running port back to mcp.json
   if (PORT !== mcpConfig.serverPort) {
     saveMcpConfig({ serverPort: PORT });
     console.log(`Updated mcp.json serverPort: ${mcpConfig.serverPort} → ${PORT}`);
@@ -98,3 +133,11 @@ const server = app.listen(PORT, () => {
 });
 app.set("server", server);
 app.set("actualPort", PORT);
+
+// Clean up active key on shutdown
+function cleanup() {
+  deleteActiveKey();
+}
+process.on("SIGINT", () => { cleanup(); process.exit(0); });
+process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+process.on("exit", cleanup);
