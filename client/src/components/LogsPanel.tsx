@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api/client";
 
 interface LogEntry {
@@ -12,34 +12,78 @@ export default function LogsPanel() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [toolFilter, setToolFilter] = useState("");
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const limit = 50;
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
 
-  const fetchLogs = useCallback(async () => {
+  // Initial load + refresh (always fetches newest)
+  const fetchLatest = useCallback(async () => {
     try {
-      const data = await api.getMcpLogs({ limit, offset, tool: toolFilter || undefined });
+      const data = await api.getMcpLogs({ limit, offset: 0, tool: toolFilter || undefined });
       setEntries(data.entries);
       setTotal(data.total);
+      setHasMore(data.entries.length < data.total);
     } catch {
       // Ignore fetch errors during auto-refresh
     } finally {
       setLoading(false);
     }
-  }, [offset, toolFilter]);
+  }, [toolFilter]);
 
+  // Load older entries (append)
+  const fetchMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const offset = entriesRef.current.length;
+      const data = await api.getMcpLogs({ limit, offset, tool: toolFilter || undefined });
+      setEntries((prev) => [...prev, ...data.entries]);
+      setTotal(data.total);
+      setHasMore(offset + data.entries.length < data.total);
+    } catch {
+      // Ignore
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [toolFilter, loadingMore]);
+
+  // Reset on filter change
   useEffect(() => {
     setLoading(true);
-    fetchLogs();
-  }, [fetchLogs]);
+    setEntries([]);
+    setExpandedIdx(null);
+    fetchLatest();
+  }, [fetchLatest]);
 
+  // Auto-refresh (newest only, don't reset scroll)
   useEffect(() => {
     if (!autoRefresh) return;
-    const id = setInterval(fetchLogs, 5000);
+    const id = setInterval(fetchLatest, 5000);
     return () => clearInterval(id);
-  }, [autoRefresh, fetchLogs]);
+  }, [autoRefresh, fetchLatest]);
+
+  // Intersection observer for infinite scroll
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (observed) => {
+        if (observed[0].isIntersecting && hasMore && !loadingMore) {
+          fetchMore();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, fetchMore]);
 
   // Collect unique tool names for filter
   const toolNames = [...new Set(entries.map((e) => e.tool))].sort();
@@ -77,7 +121,7 @@ export default function LogsPanel() {
         <div className="flex items-center gap-3">
           <select
             value={toolFilter}
-            onChange={(e) => { setToolFilter(e.target.value); setOffset(0); }}
+            onChange={(e) => setToolFilter(e.target.value)}
             className="px-2 py-1 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none"
           >
             <option value="">All tools</option>
@@ -148,27 +192,15 @@ export default function LogsPanel() {
         </div>
       )}
 
-      {/* Pagination */}
-      {total > limit && (
-        <div className="flex items-center justify-center gap-3">
-          <button
-            disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-            className="px-3 py-1 text-xs bg-surface-input border border-theme-input rounded hover:bg-surface-hover disabled:opacity-30 transition"
-          >
-            Newer
-          </button>
-          <span className="text-xs text-theme-muted">
-            {offset + 1}-{Math.min(offset + limit, total)} of {total}
-          </span>
-          <button
-            disabled={offset + limit >= total}
-            onClick={() => setOffset(offset + limit)}
-            className="px-3 py-1 text-xs bg-surface-input border border-theme-input rounded hover:bg-surface-hover disabled:opacity-30 transition"
-          >
-            Older
-          </button>
+      {/* Infinite scroll sentinel */}
+      <div ref={sentinelRef} className="h-1" />
+      {loadingMore && (
+        <div className="flex justify-center py-4">
+          <div className="w-4 h-4 border-2 border-gray-600 border-t-gray-200 rounded-full animate-spin" />
         </div>
+      )}
+      {!hasMore && entries.length > 0 && entries.length >= limit && (
+        <p className="text-center text-xs text-theme-muted py-2">All logs loaded</p>
       )}
     </div>
   );
