@@ -512,6 +512,59 @@ loggedTool(
   }
 );
 
+// ── Service context tools ──────────────────────────────────────────────
+
+import {
+  addServiceContext,
+  removeServiceContext,
+  getServiceContext,
+  loadServiceContexts,
+  resolveServiceContext,
+} from "./service-contexts.js";
+
+loggedTool(
+  "service_context_set",
+  "Link a brain note to a service as persistent context. The note's content will be included whenever service_request is called for that service. Use this for things like signature preferences, formatting rules, or persona instructions.",
+  {
+    service: z.string().describe("Service key (e.g. 'gmail', 'github')"),
+    path: z.string().describe("Brain note path to link (e.g. 'knowledge/entities/email-signature.md')"),
+  },
+  async ({ service, path }) => {
+    addServiceContext(service, path);
+    const all = getServiceContext(service);
+    return { content: [{ type: "text", text: `Linked "${path}" to ${service}. Context notes (${all.length}): ${all.join(", ")}` }] };
+  }
+);
+
+loggedTool(
+  "service_context_remove",
+  "Unlink a brain note from a service's context.",
+  {
+    service: z.string().describe("Service key"),
+    path: z.string().describe("Brain note path to unlink"),
+  },
+  async ({ service, path }) => {
+    removeServiceContext(service, path);
+    const remaining = getServiceContext(service);
+    return { content: [{ type: "text", text: `Unlinked "${path}" from ${service}. Remaining: ${remaining.length > 0 ? remaining.join(", ") : "none"}` }] };
+  }
+);
+
+loggedTool(
+  "service_context_list",
+  "List all service context links — which brain notes are attached to which services.",
+  {},
+  async () => {
+    const all = loadServiceContexts();
+    const entries = Object.entries(all);
+    if (entries.length === 0) {
+      return { content: [{ type: "text", text: "No service contexts configured. Use service_context_set to link brain notes to services." }] };
+    }
+    const lines = entries.map(([svc, paths]) => `${svc}: ${paths.join(", ")}`);
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  }
+);
+
 // ── Service tools ───────────────────────────────────────────────────────
 
 loggedTool(
@@ -620,11 +673,16 @@ loggedTool(
       }
 
       const statusLine = `${response.status} ${response.statusText}`;
+
+      // Include linked service context (brain notes) in the response
+      const context = resolveServiceContext(service);
+      const contextBlock = context ? `\n\n--- Service Context ---\n${context}\n--- End Context ---` : "";
+
       return {
         content: [
           {
             type: "text",
-            text: `${statusLine}\n\n${formattedResponse}`,
+            text: `${statusLine}\n\n${formattedResponse}${contextBlock}`,
           },
         ],
         isError: response.status >= 400,
