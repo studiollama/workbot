@@ -31,6 +31,9 @@ const server = new McpServer({
   version: "0.1.0",
 });
 
+// Track which services have had their context delivered this session
+const contextDelivered = new Set<string>();
+
 // ── Logged tool wrapper ─────────────────────────────────────────────────
 
 function loggedTool(
@@ -674,9 +677,15 @@ loggedTool(
 
       const statusLine = `${response.status} ${response.statusText}`;
 
-      // Include linked service context (brain notes) in the response
-      const context = resolveServiceContext(service);
-      const contextBlock = context ? `\n\n--- Service Context ---\n${context}\n--- End Context ---` : "";
+      // Include linked service context once per session per service
+      let contextBlock = "";
+      if (!contextDelivered.has(service)) {
+        const context = resolveServiceContext(service);
+        if (context) {
+          contextBlock = `\n\n--- Service Context (first use) ---\n${context}\n--- End Context ---`;
+          contextDelivered.add(service);
+        }
+      }
 
       return {
         content: [
