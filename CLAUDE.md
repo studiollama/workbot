@@ -2,6 +2,72 @@
 
 Reusable AI work automation architecture with a persistent Obsidian-based brain.
 
+## CRITICAL — Do Not Modify These Files
+
+**NEVER read, write, delete, or modify any of these files or directories. They contain encrypted secrets, auth state, and system config that will break the entire workbot if tampered with.**
+
+| Path | What it is | Why it's dangerous |
+|------|-----------|-------------------|
+| `.workbot/services.json` | Encrypted service tokens (AES-256-GCM) | Modifying = permanent loss of all service connections |
+| `.workbot/auth.json` | Dashboard login credentials (bcrypt) | Modifying = locked out of dashboard |
+| `.workbot/.active-key` | Ephemeral decryption key | Deleting = can't decrypt services until re-login |
+| `.workbot/certs/` | TLS certificates | Modifying = HTTPS breaks |
+| `.workbot/subagent-claude-home/` | Subagent Claude credentials | Modifying = subagents lose auth |
+| `.workbot/dashboard.json` | Dashboard layout config | Only modify via dashboard Settings UI |
+| `.mcp.json` | MCP server configuration | Only modify via dashboard MCP tab |
+| `.claude/` | Claude Code project settings | Auto-managed, do not touch |
+| `entrypoint.sh` | Container startup script | Modifying = container may not start |
+
+**If you need to check service status**, use the `service_status` MCP tool — never read services.json directly.
+
+**If you need to check auth status**, use `claude auth status` — never read auth files directly.
+
+**If something is broken**, tell the user — do not attempt to "fix" encrypted files, credentials, or system config.
+
+## Service Credentials — Always Use MCP First
+
+**NEVER store API keys, tokens, passwords, or credentials in brain notes, environment variables, config files, or code.** All service credentials are managed through the workbot dashboard and accessed via MCP tools.
+
+When you need to connect to any external service:
+1. **Check first:** Use `service_status` to see what's already connected
+2. **Use existing:** Use `service_request` to make authenticated API calls — the workbot injects auth headers automatically
+3. **Need a new service?** Tell the user to connect it via the dashboard — do NOT ask for tokens or store them yourself
+4. **Need a new instance?** Tell the user to add it via "+ Add Instance" on the service card in the dashboard
+
+Available services include: GitHub, Airtable, Asana, Gmail, Outlook, SharePoint, Stripe, Supabase, Zendesk, Freshdesk, and more. Each supports multiple named instances with different credentials.
+
+### How to make API calls
+
+**ALWAYS use `service_request`** — never use `curl`, `gh`, `fetch`, or any CLI tool with raw tokens. The MCP injects auth headers automatically.
+
+```
+service_request(service="github:universe-rd", method="GET", url="https://api.github.com/user/repos")
+service_request(service="github:workbot-wr", method="POST", url="https://api.github.com/repos/owner/repo/issues", body='{"title":"Bug fix"}')
+service_request(service="airtable:allbase-rd", method="GET", url="https://api.airtable.com/v0/appXXX/TableName")
+```
+
+### Git operations (clone, push, pull)
+
+For git operations, use `git_credentials` first to set up authentication, then use normal git commands:
+
+```
+git_credentials(service="github:workbot-wr")   # sets up git auth
+# Now git commands work:
+git clone https://github.com/org/repo.git
+git push origin main
+```
+
+**Do NOT:**
+- Run `gh` CLI commands with `--token` flags
+- Use `curl` with `-H Authorization` (you don't have the token)
+- Ask the user for tokens (they're already in the dashboard)
+- Store tokens in files, env vars, or brain notes
+
+**If `service_request` fails**, check:
+1. Is the service connected? (`service_status`)
+2. Is the instance name correct? (e.g., `github:universe-rd` not just `github`)
+3. Is the API URL correct? (must be the full URL including https://)
+
 ## Stateless Sessions — Brain is the Only Memory
 
 **Do NOT use Claude Code's auto-memory system** (`~/.claude/projects/.../memory/`). This project is designed to be cloned per business — auto-memory would leak data between instances.

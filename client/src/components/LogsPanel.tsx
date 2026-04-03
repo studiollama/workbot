@@ -98,9 +98,31 @@ export default function LogsPanel({ scope }: { scope?: string } = {}) {
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   }
 
-  function formatArgs(args: Record<string, unknown>): string {
-    const parts: string[] = [];
+  const SENSITIVE_KEYS = new Set(["token", "password", "secret", "key", "authorization", "cookie", "credentials"]);
+
+  function sanitizeValue(key: string, value: unknown): unknown {
+    const lk = key.toLowerCase();
+    if (SENSITIVE_KEYS.has(lk) || lk.includes("secret") || lk.includes("token") || lk.includes("password") || lk.includes("key")) {
+      return typeof value === "string" && value.length > 8 ? value.slice(0, 4) + "***" : "***";
+    }
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return sanitizeArgs(value as Record<string, unknown>);
+    }
+    return value;
+  }
+
+  function sanitizeArgs(args: Record<string, unknown>): Record<string, unknown> {
+    const sanitized: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(args)) {
+      sanitized[k] = sanitizeValue(k, v);
+    }
+    return sanitized;
+  }
+
+  function formatArgs(args: Record<string, unknown>): string {
+    const safe = sanitizeArgs(args);
+    const parts: string[] = [];
+    for (const [k, v] of Object.entries(safe)) {
       if (typeof v === "string") {
         parts.push(`${k}="${v.length > 40 ? v.slice(0, 40) + "..." : v}"`);
       } else if (v !== undefined && v !== null) {
@@ -176,7 +198,7 @@ export default function LogsPanel({ scope }: { scope?: string } = {}) {
                   <td className="px-3 py-2 text-theme-secondary truncate max-w-[300px]">
                     {expandedIdx === i ? (
                       <pre className="whitespace-pre-wrap text-theme-primary font-mono">
-                        {JSON.stringify(entry.args, null, 2)}
+                        {JSON.stringify(sanitizeArgs(entry.args), null, 2)}
                       </pre>
                     ) : (
                       formatArgs(entry.args)

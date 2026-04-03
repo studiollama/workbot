@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "../api/client";
 import { useServices } from "../context/ServicesContext";
 import ServiceDrawer from "../components/ServiceDrawer";
@@ -48,6 +48,13 @@ export default function Dashboard({ onLogout }: DashboardProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills" | "logs" | "workflows" | "subagents">("services");
+  const [subagents, setSubagents] = useState<any[]>([]);
+
+  const fetchSubagents = useCallback(async () => {
+    try { setSubagents(await api.getSubagents()); } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { fetchSubagents(); }, [fetchSubagents]);
 
   if (loading) {
     return (
@@ -66,6 +73,20 @@ export default function Dashboard({ onLogout }: DashboardProps) {
             <p className="text-theme-secondary text-sm mt-1">Service Connections</p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Kill switch */}
+            <button
+              onClick={async () => {
+                if (!confirm("Shut down the workbot container?\n\nThis will stop all sessions, subagents, and the dashboard.\nThe container will need to be restarted manually.")) return;
+                try { await api.shutdown(); } catch { /* connection will drop */ }
+              }}
+              className="p-2 rounded-lg bg-red-900/50 hover:bg-red-800 text-red-400 hover:text-red-300 transition"
+              title="Shutdown container"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10 2v8" />
+                <path d="M14.5 4.5a7 7 0 11-9 0" />
+              </svg>
+            </button>
             {/* Settings (gear) */}
             <button
               onClick={() => setSettingsOpen(true)}
@@ -234,8 +255,11 @@ export default function Dashboard({ onLogout }: DashboardProps) {
               difficulty={config[key]?.difficulty}
               extraFields={config[key]?.extraFields}
               oauth={config[key]?.oauth}
-              status={services[key] ?? { connected: false }}
+              status={services[key] ?? Object.values(services).find((s) => s.serviceType === key && s.connected) ?? { connected: false }}
+              allServices={services}
               onUpdate={refresh}
+              subagents={subagents}
+              onSubagentsChange={fetchSubagents}
             />
           );
 
@@ -305,6 +329,51 @@ const DIFFICULTY_STYLES: Record<string, { bg: string; text: string; border: stri
   "Device Login": { bg: "bg-surface-hover/50", text: "text-theme-muted", border: "border border-theme" },
 };
 
+function InstanceRow({ instId, inst, onUpdate }: {
+  instId: string;
+  inst: { instanceName?: string; user?: string };
+  onUpdate: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(inst.instanceName || instId);
+  const [busy, setBusy] = useState(false);
+
+  async function handleRename() {
+    if (!name.trim() || name === inst.instanceName) { setEditing(false); return; }
+    setBusy(true);
+    try {
+      await api.renameServiceInstance(instId, name.trim());
+      await onUpdate();
+    } catch { /* ignore */ }
+    finally { setBusy(false); setEditing(false); }
+  }
+
+  return (
+    <div className="flex items-center justify-between bg-surface-input/50 rounded px-2 py-1.5 gap-2">
+      <div className="flex-1 min-w-0">
+        {editing ? (
+          <div className="flex gap-1">
+            <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") handleRename(); if (e.key === "Escape") setEditing(false); }}
+              className="flex-1 px-1 py-0.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
+            <button onClick={handleRename} disabled={busy} className="text-[10px] text-accent-400">{busy ? "..." : "save"}</button>
+            <button onClick={() => setEditing(false)} className="text-[10px] text-theme-muted">cancel</button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-theme-primary truncate">{inst.instanceName || instId}</span>
+            {inst.user && <span className="text-[10px] text-theme-muted">{inst.user}</span>}
+            <button onClick={() => setEditing(true)} className="text-[10px] text-theme-muted hover:text-accent-400 transition">rename</button>
+          </div>
+        )}
+      </div>
+      <button onClick={async () => {
+        try { await api.disconnectService(instId); await onUpdate(); } catch {}
+      }} className="text-[10px] text-theme-muted hover:text-red-400 transition shrink-0">remove</button>
+    </div>
+  );
+}
+
 function ServiceCard({
   serviceKey,
   name,
@@ -316,7 +385,10 @@ function ServiceCard({
   extraFields,
   oauth,
   status,
+  allServices,
   onUpdate,
+  subagents,
+  onSubagentsChange,
 }: {
   serviceKey: string;
   name: string;
@@ -328,14 +400,34 @@ function ServiceCard({
   extraFields?: { key: string; label: string; placeholder: string }[];
   oauth?: { scopes: string[]; redirectPath: string };
   status: { connected: boolean; user?: string };
+  allServices: Record<string, any>;
   onUpdate: () => Promise<void>;
+  subagents: any[];
+  onSubagentsChange: () => void;
 }) {
   const [token, setToken] = useState("");
+  const [instanceName, setInstanceName] = useState("Default");
   const [extras, setExtras] = useState<Record<string, string>>(status.extras ?? {});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showManualToken, setShowManualToken] = useState(false);
+  const [showAgents, setShowAgents] = useState(false);
+  const [showAddInstance, setShowAddInstance] = useState(false);
+  const [newInstanceName, setNewInstanceName] = useState("");
+  const [newInstanceToken, setNewInstanceToken] = useState("");
+  const [newInstanceExtras, setNewInstanceExtras] = useState<Record<string, string>>({});
+
+  async function toggleAgentService(agentId: string, currentServices: string[], instanceId?: string) {
+    const key = instanceId || serviceKey;
+    const updated = currentServices.includes(key)
+      ? currentServices.filter((k) => k !== key)
+      : [...currentServices, key];
+    try {
+      await api.updateSubagent(agentId, { allowedServices: updated });
+      onSubagentsChange();
+    } catch { /* ignore */ }
+  }
 
   // Codex device code flow state
   const [deviceCode, setDeviceCode] = useState<{
@@ -361,9 +453,10 @@ function ServiceCard({
     setError("");
     setBusy(true);
     try {
-      await api.connectService(
+      await api.connectServiceInstance(
         serviceKey,
         token,
+        instanceName.trim() || "Default",
         extraFields ? extras : undefined
       );
       setToken("");
@@ -521,6 +614,7 @@ function ServiceCard({
 
       {/* Connected state */}
       {status.connected && (
+        <div className="space-y-2">
         <div className="flex items-center gap-3">
           <button
             onClick={handleDisconnect}
@@ -529,6 +623,14 @@ function ServiceCard({
           >
             Disconnect
           </button>
+          {subagents.length > 0 && (
+            <button
+              onClick={() => setShowAgents(!showAgents)}
+              className="text-sm text-accent-400 hover:text-accent-300 transition"
+            >
+              Agents ({subagents.filter((a) => a.allowedServices?.some((s: string) => s === serviceKey || s.startsWith(serviceKey + ":"))).length}/{subagents.length})
+            </button>
+          )}
           {oauth && (
             <button
               onClick={async () => {
@@ -566,6 +668,89 @@ function ServiceCard({
             </button>
           )}
         </div>
+        {/* Assign to Agents popup — shows all instances of this type */}
+        {showAgents && (() => {
+          const instances = Object.entries(allServices).filter(
+            ([k, v]) => v.connected && (v.serviceType === serviceKey || k === serviceKey)
+          );
+          return (
+            <div className="bg-surface-input/50 rounded-lg p-3 space-y-2">
+              <p className="text-[10px] text-theme-muted">Toggle which subagents can access {name}</p>
+              {subagents.map((agent) => (
+                <div key={agent.id} className="space-y-1">
+                  <p className="text-xs text-theme-secondary font-medium">{agent.name}</p>
+                  <div className="flex flex-wrap gap-1 ml-2">
+                    {instances.map(([instId, instStatus]) => {
+                      const instName = instStatus.instanceName || instId;
+                      const assigned = agent.allowedServices?.includes(instId);
+                      return (
+                        <button key={instId} onClick={() => toggleAgentService(agent.id, agent.allowedServices ?? [], instId)}
+                          className={`px-2 py-0.5 text-[10px] rounded transition ${
+                            assigned ? "bg-accent-600/30 text-accent-300 border border-accent-500/40" : "bg-surface-input text-theme-muted border border-transparent hover:border-theme-input"
+                          }`}>
+                          {assigned ? "+" : ""} {instName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* All instances of this type */}
+        {(() => {
+          const allInstances = Object.entries(allServices).filter(
+            ([, v]) => v.connected && v.serviceType === serviceKey
+          );
+          if (allInstances.length === 0) return null;
+          return (
+            <div className="space-y-1">
+              <p className="text-[10px] text-theme-muted uppercase tracking-wider">Instances ({allInstances.length})</p>
+              {allInstances.map(([instId, inst]) => (
+                <InstanceRow key={instId} instId={instId} inst={inst} onUpdate={onUpdate} />
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* Add Instance button + form */}
+        {!showAddInstance ? (
+          <button onClick={() => setShowAddInstance(true)} className="text-xs text-accent-400 hover:text-accent-300 transition">
+            + Add Instance
+          </button>
+        ) : (
+          <div className="bg-surface-input/50 rounded-lg p-3 space-y-2">
+            <input value={newInstanceName} onChange={(e) => setNewInstanceName(e.target.value)} placeholder="Instance name (e.g. Read Only)" autoFocus
+              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
+            <input type="password" value={newInstanceToken} onChange={(e) => setNewInstanceToken(e.target.value)}
+              placeholder={tokenLabel || (tokenPrefix ? `${tokenPrefix}...` : "API Token")}
+              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono" />
+            {extraFields?.map((field) => (
+              <input key={field.key} value={newInstanceExtras[field.key] || ""} onChange={(e) => setNewInstanceExtras({ ...newInstanceExtras, [field.key]: e.target.value })}
+                placeholder={field.placeholder}
+                className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
+            ))}
+            <div className="flex gap-2">
+              <button onClick={async () => {
+                if (!newInstanceName.trim() || !newInstanceToken.trim()) return;
+                setBusy(true);
+                try {
+                  await api.connectServiceInstance(serviceKey, newInstanceToken, newInstanceName, extraFields ? newInstanceExtras : undefined);
+                  setNewInstanceName(""); setNewInstanceToken(""); setNewInstanceExtras({}); setShowAddInstance(false);
+                  await onUpdate();
+                } catch (err: any) { setError(err.message); } finally { setBusy(false); }
+              }} disabled={busy || !newInstanceName.trim() || !newInstanceToken.trim()}
+                className="px-3 py-1 bg-accent-600 hover:bg-accent-700 text-white text-xs rounded transition disabled:opacity-50">
+                {busy ? "..." : "Connect"}
+              </button>
+              <button onClick={() => { setShowAddInstance(false); setNewInstanceName(""); setNewInstanceToken(""); }}
+                className="px-3 py-1 text-xs text-theme-secondary hover:text-theme-primary transition">Cancel</button>
+            </div>
+          </div>
+        )}
+        </div>
       )}
 
       {/* Disconnected state — PAT services */}
@@ -580,6 +765,14 @@ function ServiceCard({
             </button>
           ) : (
             <form onSubmit={handleConnect} className="space-y-2">
+              {/* Instance name */}
+              <input
+                type="text"
+                placeholder="Instance name (e.g. Default, Read Only, Production)"
+                value={instanceName}
+                onChange={(e) => setInstanceName(e.target.value)}
+                className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+              />
               {/* OAuth services: show credential fields + sign-in button */}
               {oauth && extraFields ? (
                 <>

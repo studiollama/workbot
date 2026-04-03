@@ -9,6 +9,7 @@ interface SubagentSummary {
   allowedServices: string[];
   brainPath: string;
   claudeAuth: { mode: string };
+  autoSpawn?: boolean;
   session: { pid: number; startedAt: string } | null;
 }
 
@@ -80,6 +81,7 @@ export default function SubagentsPanel() {
             <SubagentCard
               key={s.id}
               subagent={s}
+              connectedServices={connectedServices}
               onToggle={async () => {
                 try { await api.updateSubagent(s.id, { enabled: !s.enabled }); fetchSubagents(); }
                 catch (err: any) { setError(err.message); }
@@ -89,9 +91,22 @@ export default function SubagentsPanel() {
                 catch (err: any) { setError(err.message); }
               }}
               onDelete={async () => {
-                if (!confirm(`Delete subagent "${s.name}"?`)) return;
-                try { await api.deleteSubagent(s.id); fetchSubagents(); }
-                catch (err: any) { setError(err.message); }
+                if (!confirm(
+                  `Delete subagent "${s.name}"?\n\n` +
+                  `This will:\n` +
+                  `  - Kill all running sessions and terminals\n` +
+                  `  - Remove the Linux user (sa-${s.id})\n` +
+                  `  - Remove Claude credentials\n` +
+                  `  - Archive the brain to workbot-brain/archive/subagents/\n\n` +
+                  `The brain data will NOT be permanently deleted — it can be recovered from the archive.`
+                )) return;
+                try {
+                  const result = await api.deleteSubagent(s.id) as any;
+                  if (result.archivePath) {
+                    setError(`Subagent deleted. Brain archived to: ${result.archivePath}`);
+                  }
+                  fetchSubagents();
+                } catch (err: any) { setError(err.message); }
               }}
               onRefresh={fetchSubagents}
             />
@@ -102,18 +117,17 @@ export default function SubagentsPanel() {
   );
 }
 
-function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh }: {
+function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, connectedServices }: {
   subagent: SubagentSummary;
   onToggle: () => void;
   onSpawn: () => void;
   onDelete: () => void;
   onRefresh: () => void;
+  connectedServices: string[];
 }) {
   const [authStatus, setAuthStatus] = useState<{ mode: string; authenticated: boolean } | null>(null);
-  const [showAuth, setShowAuth] = useState(false);
-  const [loginInfo, setLoginInfo] = useState<{ verificationUrl?: string; userCode?: string } | null>(null);
-  const [tokenInput, setTokenInput] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
+  const [terminalLoading, setTerminalLoading] = useState(false);
+  const [showServices, setShowServices] = useState(false);
 
   useEffect(() => {
     if (s.claudeAuth.mode === "oauth") {
@@ -121,42 +135,29 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh }: {
     }
   }, [s.id, s.claudeAuth.mode]);
 
-  async function handleLogin() {
-    setAuthBusy(true);
+  async function handleTerminal() {
+    setTerminalLoading(true);
     try {
-      const result = await api.startSubagentLogin(s.id);
-      setLoginInfo(result);
-      // Poll for completion
-      const poll = setInterval(async () => {
-        const check = await api.checkSubagentLogin(s.id);
-        if (check.authenticated) {
-          clearInterval(poll);
-          setLoginInfo(null);
-          setAuthBusy(false);
-          setAuthStatus({ mode: "oauth", authenticated: true });
-          onRefresh();
-        }
-      }, 3000);
-      // Stop polling after 5 minutes
-      setTimeout(() => { clearInterval(poll); setAuthBusy(false); }, 300_000);
-    } catch { setAuthBusy(false); }
+      const result = await api.startTerminal(s.id);
+      if (result.url) {
+        window.open(result.url, `terminal-${s.id}`);
+      }
+    } catch (err: any) {
+      console.error("Terminal failed:", err);
+    } finally {
+      setTerminalLoading(false);
+    }
   }
 
-  async function handlePasteToken() {
-    if (!tokenInput.trim()) return;
-    setAuthBusy(true);
+  async function toggleService(svc: string) {
+    const current = s.allowedServices;
+    const updated = current.includes(svc)
+      ? current.filter((k) => k !== svc)
+      : [...current, svc];
     try {
-      await api.setSubagentToken(s.id, tokenInput.trim());
-      setTokenInput("");
-      setAuthStatus({ mode: "oauth", authenticated: true });
+      await api.updateSubagent(s.id, { allowedServices: updated });
       onRefresh();
     } catch { /* ignore */ }
-    finally { setAuthBusy(false); }
-  }
-
-  async function handleLogout() {
-    await api.subagentLogout(s.id);
-    setAuthStatus({ mode: "oauth", authenticated: false });
   }
 
   return (
@@ -173,8 +174,20 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh }: {
           {s.description && <p className="text-xs text-theme-secondary mt-0.5 truncate">{s.description}</p>}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          <button onClick={onSpawn} className="px-2 py-1 text-xs bg-accent-600 hover:bg-accent-700 text-white rounded transition">
-            Spawn
+          {s.session ? (
+            <button onClick={async () => {
+              try { await api.stopSubagent(s.id); onRefresh(); } catch {}
+            }} className="px-2 py-1 text-xs bg-red-700 hover:bg-red-600 text-white rounded transition">
+              Stop
+            </button>
+          ) : (
+            <button onClick={onSpawn} disabled={!s.enabled} className="px-2 py-1 text-xs bg-accent-600 hover:bg-accent-700 text-white rounded transition disabled:opacity-50">
+              Spawn
+            </button>
+          )}
+          <button onClick={handleTerminal} disabled={!s.enabled || terminalLoading}
+            className="px-2 py-1 text-xs bg-teal-700 hover:bg-teal-600 text-white rounded transition disabled:opacity-50">
+            {terminalLoading ? "..." : "Terminal"}
           </button>
           <a href={`/subagent/${s.id}`} className="px-2 py-1 text-xs bg-surface-input hover:bg-surface-hover text-theme-secondary rounded transition">
             Dashboard
@@ -190,80 +203,52 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh }: {
 
       <div className="flex items-center gap-4 text-xs text-theme-muted">
         <span>Brain: <code className="text-theme-secondary">{s.brainPath}</code></span>
-        <span>{s.allowedServices.length} service{s.allowedServices.length !== 1 ? "s" : ""}</span>
+        <button onClick={() => setShowServices(!showServices)} className="text-accent-400 hover:text-accent-300 transition">
+          {s.allowedServices.length} service{s.allowedServices.length !== 1 ? "s" : ""} {showServices ? "^" : "v"}
+        </button>
         <span className="flex items-center gap-1">
           {s.claudeAuth.mode}
           {s.claudeAuth.mode === "oauth" && authStatus && (
             <span className={`w-1.5 h-1.5 rounded-full ${authStatus.authenticated ? "bg-green-500" : "bg-red-500"}`} />
           )}
         </span>
-        <button onClick={() => setShowAuth(!showAuth)} className="text-accent-400 hover:text-accent-300 transition">
-          {showAuth ? "Hide Auth" : "Auth"}
-        </button>
+        <label className="flex items-center gap-1 cursor-pointer" title="Auto-spawn on container restart">
+          <input type="checkbox" checked={!!s.autoSpawn}
+            onChange={async () => {
+              try { await api.updateSubagent(s.id, { autoSpawn: !s.autoSpawn }); onRefresh(); } catch {}
+            }}
+            className="rounded w-3 h-3" />
+          <span className="text-[10px]">auto</span>
+        </label>
       </div>
 
-      {/* Auth section */}
-      {showAuth && (
+      {/* Inline service editor */}
+      {showServices && (
         <div className="bg-surface-input/50 rounded-lg p-3 space-y-2">
-          {s.claudeAuth.mode === "host-spawned" ? (
-            <p className="text-xs text-theme-muted">Uses host's Claude account. No separate auth needed.</p>
-          ) : (
-            <>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-theme-secondary">
-                  {authStatus?.authenticated ? "Authenticated" : "Not authenticated"}
-                </span>
-                <div className="flex gap-1">
-                  {!authStatus?.authenticated && (
-                    <button onClick={handleLogin} disabled={authBusy}
-                      className="px-2 py-1 text-xs bg-accent-600 hover:bg-accent-700 text-white rounded transition disabled:opacity-50">
-                      {authBusy ? "..." : "Login with Claude"}
-                    </button>
-                  )}
-                  {authStatus?.authenticated && (
-                    <button onClick={handleLogout} className="px-2 py-1 text-xs text-theme-secondary hover:text-red-400 transition">
-                      Logout
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Device code flow info */}
-              {loginInfo && (
-                <div className="bg-surface-card rounded p-2 space-y-1">
-                  {loginInfo.verificationUrl && (
-                    <p className="text-xs">
-                      Open: <a href={loginInfo.verificationUrl} target="_blank" rel="noopener" className="text-accent-400 hover:text-accent-300 underline">{loginInfo.verificationUrl}</a>
-                    </p>
-                  )}
-                  {loginInfo.userCode && (
-                    <p className="text-xs">Code: <code className="text-theme-primary font-bold">{loginInfo.userCode}</code></p>
-                  )}
-                  <p className="text-[10px] text-theme-muted">Complete login in browser. This will update automatically.</p>
-                </div>
-              )}
-
-              {/* Manual token paste */}
-              {!authStatus?.authenticated && !loginInfo && (
-                <div className="flex gap-2">
-                  <input
-                    value={tokenInput}
-                    onChange={(e) => setTokenInput(e.target.value)}
-                    placeholder="Paste OAuth token (sk-ant-oat01-...)"
-                    className="flex-1 px-2 py-1 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono"
-                  />
-                  <button onClick={handlePasteToken} disabled={!tokenInput.trim() || authBusy}
-                    className="px-2 py-1 text-xs bg-surface-hover hover:bg-surface-input text-theme-secondary rounded transition disabled:opacity-30">
-                    Save
-                  </button>
-                </div>
-              )}
-            </>
-          )}
+          <p className="text-[10px] text-theme-muted">Click to toggle. Only connected host services are shown.</p>
+          <div className="flex flex-wrap gap-1.5">
+            {connectedServices.map((svc) => {
+              const assigned = s.allowedServices.includes(svc);
+              return (
+                <button key={svc} onClick={() => toggleService(svc)}
+                  className={`px-2 py-1 text-[11px] rounded transition ${
+                    assigned
+                      ? "bg-accent-600/30 text-accent-300 border border-accent-500/40"
+                      : "bg-surface-input text-theme-muted border border-transparent hover:border-theme-input"
+                  }`}>
+                  {assigned ? "+" : ""} {svc}
+                </button>
+              );
+            })}
+            {connectedServices.length === 0 && (
+              <p className="text-xs text-theme-muted">No services connected on host.</p>
+            )}
+          </div>
         </div>
       )}
 
-      {s.allowedServices.length > 0 && (
+      {/* Service badges */}
+      {!showServices && s.allowedServices.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {s.allowedServices.map((svc) => (
             <span key={svc} className="px-1.5 py-0.5 text-[10px] bg-surface-input text-theme-secondary rounded">{svc}</span>

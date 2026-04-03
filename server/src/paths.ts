@@ -13,4 +13,5 @@ export interface StoredService {
   token: string;
   user: string;
   extras?: Record<string, string>;
+  _instanceName?: string; // User-facing name for multi-instance services
 }

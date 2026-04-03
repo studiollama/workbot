@@ -9,6 +9,9 @@ import {
   STORE_DIR,
   STORE_PATH,
   type StoredService,
+  parseInstanceId,
+  makeInstanceId,
+  slugifyInstance,
 } from "../services.js";
 import { loadMcpConfig } from "../mcp-config.js";
 
@@ -17,7 +20,7 @@ const router = Router();
 // In-memory store for pending OAuth flows (state → credentials)
 const pendingOAuth = new Map<
   string,
-  { service: string; clientId: string; clientSecret: string; redirectUri: string; extras?: Record<string, string> }
+  { service: string; clientId: string; clientSecret: string; redirectUri: string; extras?: Record<string, string>; instanceName?: string }
 >();
 
 // Dashboard layout persistence
@@ -46,21 +49,38 @@ function saveDashboardConfig(config: DashboardConfig) {
 // GET /api/services/status
 router.get("/status", (_req, res) => {
   const store = loadStore();
-  const result: Record<string, { connected: boolean; user?: string; extras?: Record<string, string> }> = {};
+  const result: Record<string, {
+    connected: boolean;
+    user?: string;
+    extras?: Record<string, string>;
+    serviceType?: string;
+    instanceName?: string;
+  }> = {};
 
-  for (const key of Object.keys(SERVICES)) {
-    const saved = store[key];
-    if (saved) {
-      // Return non-secret extras so the form can pre-populate (mask secrets)
-      const safeExtras: Record<string, string> = {};
-      if (saved.extras) {
-        for (const [k, v] of Object.entries(saved.extras)) {
-          safeExtras[k] = k.includes("secret") ? "" : v;
-        }
+  // Add all connected instances (already migrated by loadStore)
+  for (const [key, saved] of Object.entries(store)) {
+    const { serviceType } = parseInstanceId(key);
+    if (!SERVICES[serviceType]) continue;
+
+    const safeExtras: Record<string, string> = {};
+    if (saved.extras) {
+      for (const [k, v] of Object.entries(saved.extras)) {
+        safeExtras[k] = k.includes("secret") ? "" : v;
       }
-      result[key] = { connected: true, user: saved.user, ...(Object.keys(safeExtras).length > 0 ? { extras: safeExtras } : {}) };
-    } else {
-      result[key] = { connected: false };
+    }
+    result[key] = {
+      connected: true,
+      user: saved.user,
+      serviceType,
+      instanceName: saved._instanceName || "Default",
+      ...(Object.keys(safeExtras).length > 0 ? { extras: safeExtras } : {}),
+    };
+  }
+
+  // Add disconnected service types (only if no instances exist for that type)
+  for (const key of Object.keys(SERVICES)) {
+    if (!result[key] && !Object.keys(result).some((k) => parseInstanceId(k).serviceType === key)) {
+      result[key] = { connected: false, serviceType: key };
     }
   }
 
@@ -73,20 +93,25 @@ router.get("/status", (_req, res) => {
       codexConnected = !!data.tokens || !!data.OPENAI_API_KEY || !!data.access_token;
     }
   } catch {}
-  result.codex = { connected: codexConnected };
+  if (!result.codex) result.codex = { connected: codexConnected, serviceType: "codex" };
 
   res.json(result);
 });
 
 // POST /api/services/:service/connect
+// Accepts optional `instanceName` in body to create a named instance
 router.post("/:service/connect", async (req, res) => {
   const { service } = req.params;
-  const { token, ...extras } = req.body;
+  const { token, instanceName, ...extras } = req.body;
 
   const config = SERVICES[service];
   if (!config) {
     return res.status(400).json({ error: `Unknown service: ${service}` });
   }
+
+  // All connections are instances — name defaults to "Default" if not provided
+  const resolvedName = instanceName?.trim() || "Default";
+  const storeKey = makeInstanceId(service, slugifyInstance(resolvedName));
 
   if (!token || typeof token !== "string") {
     return res.status(400).json({ error: "Token is required" });
@@ -140,14 +165,15 @@ router.post("/:service/connect", async (req, res) => {
         savedExtras[field.key] = extras[field.key];
       }
     }
-    store[service] = {
+    store[storeKey] = {
       token,
       user,
       ...(Object.keys(savedExtras).length > 0 ? { extras: savedExtras } : {}),
+      _instanceName: resolvedName,
     };
     saveStore(store);
 
-    res.json({ connected: true, user });
+    res.json({ connected: true, user, instanceId: storeKey });
   } catch (err: any) {
     res.status(500).json({ error: err.message ?? "Connection failed" });
   }
@@ -159,6 +185,30 @@ router.post("/:service/disconnect", (req, res) => {
   delete store[req.params.service];
   saveStore(store);
   res.json({ disconnected: true });
+});
+
+// PUT /api/services/:instanceId/rename — rename an instance
+router.put("/:service/rename", (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "Name is required" });
+
+  const store = loadStore();
+  const old = store[req.params.service];
+  if (!old) return res.status(404).json({ error: "Instance not found" });
+
+  const { serviceType } = parseInstanceId(req.params.service);
+  const newKey = makeInstanceId(serviceType, slugifyInstance(name));
+
+  // If key changed, move the entry
+  if (newKey !== req.params.service) {
+    store[newKey] = { ...old, _instanceName: name.trim() };
+    delete store[req.params.service];
+  } else {
+    store[req.params.service]._instanceName = name.trim();
+  }
+
+  saveStore(store);
+  res.json({ ok: true, newInstanceId: newKey, name: name.trim() });
 });
 
 // POST /api/services/:service/oauth/start — initiate OAuth flow
@@ -337,7 +387,9 @@ router.get("/:service/oauth/callback", async (req, res) => {
 
     // Persist refresh token + client credentials + any service-specific extras
     const store = loadStore();
-    store[service] = {
+    const oauthName = pending.instanceName?.trim() || "Default";
+    const oauthStoreKey = makeInstanceId(service, slugifyInstance(oauthName));
+    store[oauthStoreKey] = {
       token: refreshToken,
       user,
       extras: {
@@ -345,6 +397,7 @@ router.get("/:service/oauth/callback", async (req, res) => {
         client_secret: pending.clientSecret,
         ...(pending.extras ?? {}),
       },
+      _instanceName: oauthName,
     };
     saveStore(store);
 

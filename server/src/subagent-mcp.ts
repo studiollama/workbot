@@ -258,3 +258,12 @@ function formatAgo(date: Date): string {
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
 }
+
+// ── CLI entrypoint: tsx server/src/subagent-mcp.ts <subagent-id> ──────
+const cliSubagentId = process.argv[2];
+if (cliSubagentId) {
+  createSubagentMcpServer(cliSubagentId).catch((err) => {
+    console.error(`[subagent-mcp] Fatal: ${err.message}`);
+    process.exit(1);
+  });
+}

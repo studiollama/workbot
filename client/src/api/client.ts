@@ -304,6 +304,21 @@ export const api = {
   dashboardLogout: () =>
     request<{ ok: boolean }>("/dashboard-auth/logout", { method: "POST" }),
 
+  shutdown: () =>
+    request<{ ok: boolean }>("/shutdown", { method: "POST" }),
+
+  // Multi-instance service connections
+  connectServiceInstance: (serviceType: string, token: string, instanceName: string, extras?: Record<string, string>) =>
+    request<{ connected: boolean; user: string; instanceId: string }>(`/services/${serviceType}/connect`, {
+      method: "POST",
+      body: JSON.stringify({ token, instanceName, ...extras }),
+    }),
+  renameServiceInstance: (instanceId: string, name: string) =>
+    request<{ ok: boolean; newInstanceId: string; name: string }>(`/services/${instanceId}/rename`, {
+      method: "PUT",
+      body: JSON.stringify({ name }),
+    }),
+
   // Subagents
   getSubagents: () => request<any[]>("/subagents"),
   getSubagent: (id: string) => request<any>(`/subagents/${id}`),
@@ -313,6 +328,8 @@ export const api = {
     request<any>(`/subagents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteSubagent: (id: string) =>
     request<{ ok: boolean }>(`/subagents/${id}`, { method: "DELETE" }),
+  stopSubagent: (id: string) =>
+    request<{ ok: boolean }>(`/subagents/${id}/stop`, { method: "POST" }),
   spawnSubagent: (id: string, prompt?: string) =>
     request<{ sessionId: string; pid: number }>(`/subagents/${id}/spawn`, {
       method: "POST",
@@ -330,6 +347,12 @@ export const api = {
     request<{ mode: string; authenticated: boolean; raw?: string; hasCredentials?: boolean }>(`/subagents/${id}/auth/status`),
   subagentLogout: (id: string) =>
     request<{ ok: boolean }>(`/subagents/${id}/auth/logout`, { method: "POST" }),
+
+  // Subagent terminals
+  startTerminal: (id: string) =>
+    request<{ url: string; port: number; pid?: number; alreadyRunning?: boolean }>(`/subagents/${id}/terminal`, { method: "POST" }),
+  stopTerminal: (id: string) =>
+    request<{ ok: boolean }>(`/subagents/${id}/terminal`, { method: "DELETE" }),
 
   // Workflows (scope = subagentId for scoped calls, undefined for host)
   getWorkflows: (scope?: string) => request<any[]>(scope ? `/subagents/${scope}/workflows` : "/workflows"),

@@ -16,6 +16,8 @@ export function loadStore(): Record<string, StoredService> {
     if (!existsSync(STORE_PATH)) return {};
     const raw = JSON.parse(readFileSync(STORE_PATH, "utf-8"));
 
+    let data: Record<string, StoredService>;
+
     // Encrypted store — need active key to decrypt
     if (raw._encrypted === true) {
       const key = readActiveKey();
@@ -23,14 +25,48 @@ export function loadStore(): Record<string, StoredService> {
         console.warn("Encrypted services.json but no active key — returning empty store");
         return {};
       }
-      return decryptStore(raw, key);
+      data = decryptStore(raw, key);
+    } else {
+      // Legacy plaintext store
+      data = raw;
     }
 
-    // Legacy plaintext store
-    return raw;
+    // Auto-migrate bare keys to instance format
+    const { store: migrated, changed } = migrateToInstances(data);
+    if (changed) {
+      try { saveStore(migrated); } catch { /* save might fail if no active key */ }
+    }
+    return migrated;
   } catch {
     return {};
   }
+}
+
+/** Migrate bare service keys (e.g. "github") to instance keys ("github:default").
+ *  Runs automatically on loadStore — idempotent, only writes if changes were made. */
+function migrateToInstances(store: Record<string, StoredService>): { store: Record<string, StoredService>; changed: boolean } {
+  let changed = false;
+  const migrated: Record<string, StoredService> = {};
+
+  for (const [key, value] of Object.entries(store)) {
+    const { slug } = parseInstanceId(key);
+    if (slug === "default" && key === parseInstanceId(key).serviceType) {
+      // Bare key like "github" → migrate to "github:default"
+      const newKey = makeInstanceId(key, "default");
+      migrated[newKey] = { ...value, _instanceName: value._instanceName || "Default" };
+      changed = true;
+    } else {
+      // Already an instance key — ensure it has a name
+      if (!value._instanceName) {
+        migrated[key] = { ...value, _instanceName: slug === "default" ? "Default" : slug };
+        changed = true;
+      } else {
+        migrated[key] = value;
+      }
+    }
+  }
+
+  return { store: migrated, changed };
 }
 
 export function saveStore(data: Record<string, StoredService>): void {
@@ -45,6 +81,46 @@ export function saveStore(data: Record<string, StoredService>): void {
   } else {
     writeFileSync(STORE_PATH, JSON.stringify(data, null, 2));
   }
+}
+
+// ── Multi-instance helpers ─────────────────────────────────────────────
+
+/** Parse "github:read-only" → { serviceType: "github", slug: "read-only" } */
+export function parseInstanceId(instanceId: string): { serviceType: string; slug: string } {
+  const colonIdx = instanceId.indexOf(":");
+  if (colonIdx === -1) return { serviceType: instanceId, slug: "default" };
+  return { serviceType: instanceId.slice(0, colonIdx), slug: instanceId.slice(colonIdx + 1) };
+}
+
+/** Build instance ID from type + slug */
+export function makeInstanceId(serviceType: string, slug: string): string {
+  return slug === "default" ? serviceType : `${serviceType}:${slug}`;
+}
+
+/** Slugify a user-facing instance name */
+export function slugifyInstance(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "default";
+}
+
+/** Get all instance IDs in the store for a given service type */
+export function getInstancesForType(store: Record<string, StoredService>, serviceType: string): string[] {
+  return Object.keys(store).filter((key) => parseInstanceId(key).serviceType === serviceType);
+}
+
+/** Resolve an instance ID to its ServiceConfig (looks up by type) */
+export function resolveServiceConfig(instanceId: string): ServiceConfig | undefined {
+  const { serviceType } = parseInstanceId(instanceId);
+  return SERVICES[serviceType];
+}
+
+/** Check if a subagent's allowedServices list permits an instance ID */
+export function isServiceAllowed(instanceId: string, allowedServices: string[]): boolean {
+  const { serviceType } = parseInstanceId(instanceId);
+  // Exact instance match
+  if (allowedServices.includes(instanceId)) return true;
+  // Bare type match (grants access to all instances of that type)
+  if (allowedServices.includes(serviceType)) return true;
+  return false;
 }
 
 export interface OAuthConfig {

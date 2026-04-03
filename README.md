@@ -467,8 +467,3 @@ workbot/
   .mcp.json                # MCP server configuration
 ```
 
----
-
-## License
-
-Private — Studio Llama

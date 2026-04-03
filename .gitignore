@@ -13,3 +13,4 @@ workbot-brain/context/
 workbot-brain/knowledge/
 workbot-brain/inbox/
 workbot-brain/archive/
+workbot-brain/subagents/

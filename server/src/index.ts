@@ -1,6 +1,9 @@
 import "dotenv/config";
 import express from "express";
 import https from "https";
+import { spawn } from "child_process";
+import { PROJECT_ROOT } from "./paths.js";
+import { loadStore } from "./services.js";
 import session from "express-session";
 import cors from "cors";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
@@ -19,7 +22,7 @@ import skillsRoutes from "./routes/skills.js";
 import dashboardAuthRoutes from "./routes/dashboard-auth.js";
 import logsRoutes from "./routes/logs.js";
 import workflowRoutes from "./routes/workflows.js";
-import subagentRoutes from "./routes/subagents.js";
+import subagentRoutes, { activeSessions } from "./routes/subagents.js";
 import { loadMcpConfig, saveMcpConfig } from "./mcp-config.js";
 import { ensureCerts } from "./certs.js";
 import { requireAuth } from "./middleware/requireAuth.js";
@@ -128,6 +131,29 @@ app.post("/api/workflows/:id/trigger/:webhookId", (req, res, next) => {
 app.use("/api/workflows", requireAuth, workflowRoutes);
 app.use("/api/subagents", requireAuth, subagentRoutes);
 
+// Kill switch — shuts down the container
+// PID 1 is bash with a SIGTERM trap that kills claude and exits cleanly
+app.post("/api/shutdown", requireAuth, (_req, res) => {
+  res.json({ ok: true });
+  console.log("[shutdown] Kill switch activated — sending SIGTERM to PID 1...");
+  setTimeout(() => {
+    const { execSync } = require("child_process");
+    try { execSync("kill -TERM 1", { stdio: "ignore" }); } catch {}
+  }, 500);
+});
+
+// Internal API: decrypted store for MCP processes (localhost only, no auth)
+// MCP subagent processes call this instead of reading the active-key file
+app.get("/api/internal/store", (req, res) => {
+  // Only allow from localhost
+  const ip = req.ip || req.socket.remoteAddress || "";
+  if (!ip.includes("127.0.0.1") && !ip.includes("::1") && !ip.includes("::ffff:127.0.0.1")) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const store = loadStore();
+  res.json(store);
+});
+
 // Clean up stale active key from previous crash
 deleteActiveKey();
 
@@ -150,6 +176,36 @@ app.set("actualPort", PORT);
 const workflowEngine = new WorkflowEngine();
 workflowEngine.start();
 app.set("workflowEngine", workflowEngine);
+
+// Auto-spawn subagents after a delay (let remote-control start first)
+import { loadSubagents, getSubagentClaudeHome, getSubagentLinuxUser } from "./subagents.js";
+import { resolve as resolvePath } from "path";
+setTimeout(() => {
+  const subs = loadSubagents().filter((s) => s.autoSpawn && s.enabled);
+  if (subs.length === 0) return;
+  console.log(`[auto-spawn] Spawning ${subs.length} subagent(s)...`);
+  for (const s of subs) {
+    const cwd = resolvePath(PROJECT_ROOT, "workbot-brain", "subagents", s.id);
+    const args = ["remote-control", "--name", s.name, "--spawn", "same-dir", "--verbose"];
+    args.push("--permission-mode", s.bypassPermissions ? "bypassPermissions" : "auto");
+
+    const envArgs: string[] = [];
+    if (s.claudeAuth.mode === "oauth") envArgs.push(`HOME=${getSubagentClaudeHome(s.id)}`);
+    envArgs.push(`PATH=/home/workbot/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`);
+
+    const envStr = envArgs.map((e) => `export ${e}`).join(" && ");
+    const claudeCmd = `${envStr} && cd ${cwd} && exec claude ${args.join(" ")}`;
+    const linuxUser = getSubagentLinuxUser(s.id);
+
+    const proc = spawn("runuser", ["-u", linuxUser, "--", "script", "-qfc", claudeCmd, "/dev/null"], {
+      cwd, stdio: "ignore", detached: true,
+    });
+    proc.unref();
+    activeSessions.set(s.id, { pid: proc.pid!, startedAt: new Date().toISOString() });
+    proc.on("exit", () => { activeSessions.delete(s.id); });
+    console.log(`[auto-spawn] ${s.name} (${s.id}) → PID ${proc.pid}`);
+  }
+}, 15_000);
 
 // Clean up active key on shutdown
 function cleanup() {

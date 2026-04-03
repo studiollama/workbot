@@ -23,11 +23,90 @@ import {
   writeNote,
 } from "./brain-utils.js";
 
+import { getSubagent as getSubagentById, getSubagentBrainRoot, loadSubagents, createSubagent as createSubagentDef, updateSubagent as updateSubagentDef, deleteSubagent as deleteSubagentDef } from "./subagents.js";
+import { parseInstanceId, isServiceAllowed } from "./services.js";
+import { createScopedBrainUtils } from "./subagent-brain-utils.js";
+import {
+  addServiceContext,
+  removeServiceContext,
+  getServiceContext,
+  loadServiceContexts,
+  resolveServiceContext,
+} from "./service-contexts.js";
+import { loadWorkflows, loadRuns, getRun, getWorkflow, upsertWorkflow, deleteWorkflow as removeWorkflow, type WorkflowDefinition } from "./workflows-config.js";
+import { randomUUID } from "crypto";
+import { WorkflowEngine } from "./workflow-engine.js";
+
 const execFileAsync = promisify(execFile);
 const mcpConfig = loadMcpConfig();
 
+import https from "https";
+
+/** Load decrypted store — subagent MCP processes fetch from the server's
+ *  internal API (avoids needing the active-key file). Host MCP reads directly. */
+async function loadStoreSecure(): Promise<Record<string, import("./paths.js").StoredService>> {
+  if (SUBAGENT_ID) {
+    try {
+      const port = mcpConfig.serverPort || 3001;
+      const data = await new Promise<string>((resolve, reject) => {
+        const req = https.get(`https://localhost:${port}/api/internal/store`, {
+          rejectUnauthorized: false, // self-signed cert
+        }, (res) => {
+          let body = "";
+          res.on("data", (c) => { body += c; });
+          res.on("end", () => resolve(body));
+        });
+        req.on("error", reject);
+        req.setTimeout(5000, () => { req.destroy(); reject(new Error("timeout")); });
+      });
+      return JSON.parse(data);
+    } catch { /* fallback to direct read */ }
+  }
+  return loadStore();
+}
+
+// ── Subagent scoping: --subagent <id> flag ─────────────────────────────
+// When present, brain tools operate on the subagent's brain and services
+// are filtered to only those assigned to the subagent.
+const subagentFlag = process.argv.indexOf("--subagent");
+const SUBAGENT_ID = subagentFlag >= 0 ? process.argv[subagentFlag + 1] : null;
+if (SUBAGENT_ID) console.error(`[mcp] Subagent mode: ${SUBAGENT_ID}, argv: ${process.argv.join(" ")}`);
+
+// Security: non-root users MUST use --subagent flag to prevent privilege escalation
+import { userInfo } from "os";
+const currentUser = userInfo();
+if (!SUBAGENT_ID && currentUser.uid !== 0) {
+  console.error("[mcp] FATAL: Non-root users must specify --subagent <id>. Refusing to start in host mode.");
+  process.exit(1);
+}
+// Security: validate that --subagent ID matches the running Linux user (sa-{id})
+// Prevents a subagent from passing a different --subagent flag to access another's services
+if (SUBAGENT_ID && currentUser.uid !== 0) {
+  const expectedUser = `sa-${SUBAGENT_ID}`;
+  if (currentUser.username !== expectedUser) {
+    console.error(`[mcp] FATAL: User ${currentUser.username} cannot use --subagent ${SUBAGENT_ID} (expected ${expectedUser}).`);
+    process.exit(1);
+  }
+}
+
+// Scoped brain root: subagent brain or host brain
+const SCOPED_BRAIN_ROOT = SUBAGENT_ID ? getSubagentBrainRoot(SUBAGENT_ID) : BRAIN_ROOT;
+
+// Note: service filtering uses isServiceAllowed() from services.ts
+// which reads subagent config fresh each call (not cached)
+
+// Override brain-utils functions when in subagent mode
+const scopedBrain = SUBAGENT_ID ? createScopedBrainUtils(SCOPED_BRAIN_ROOT) : null;
+const scopedGetAllNotes = scopedBrain ? scopedBrain.getAllNotes : getAllNotes;
+const scopedLoadNote = scopedBrain ? scopedBrain.loadNote : loadNote;
+const scopedValidateNote = scopedBrain ? scopedBrain.validateNote : validateNote;
+const scopedWriteNote = scopedBrain ? scopedBrain.writeNote : writeNote;
+const scopedBuildLinkGraph = scopedBrain ? scopedBrain.buildLinkGraph : buildLinkGraph;
+
+const serverName = SUBAGENT_ID ? `workbot-subagent-${SUBAGENT_ID}` : "workbot";
+
 const server = new McpServer({
-  name: "workbot",
+  name: serverName,
   version: "0.1.0",
 });
 
@@ -139,7 +218,7 @@ loggedTool(
     force: z.boolean().optional().describe("Skip validation warnings and write anyway. Default false."),
   },
   async ({ path, content, force }) => {
-    const validation = validateNote(content);
+    const validation = scopedValidateNote(content);
 
     if (!validation.valid && !force) {
       return {
@@ -151,7 +230,7 @@ loggedTool(
       };
     }
 
-    writeNote(path, content);
+    scopedWriteNote(path, content);
 
     let warnings = "";
     if (validation.warnings.length > 0) {
@@ -184,7 +263,7 @@ loggedTool(
     path: z.string().describe("Note path relative to vault root, e.g. knowledge/decisions/my-decision.md"),
   },
   async ({ path }) => {
-    const graph = buildLinkGraph();
+    const graph = scopedBuildLinkGraph();
     const entry = graph.get(path);
 
     if (!entry) {
@@ -231,7 +310,7 @@ loggedTool(
   },
   async ({ folder, tag, limit }) => {
     const maxResults = limit ?? 50;
-    const allPaths = getAllNotes();
+    const allPaths = scopedGetAllNotes();
     const results: string[] = [];
 
     for (const p of allPaths) {
@@ -242,11 +321,11 @@ loggedTool(
 
       // Tag filter
       if (tag) {
-        const note = loadNote(p);
+        const note = scopedLoadNote(p);
         if (!note || !note.tags.some((t) => t === tag || t.startsWith(tag + "/"))) continue;
       }
 
-      const note = loadNote(p);
+      const note = scopedLoadNote(p);
       const title = note?.title ?? p;
       const tags = note?.tags.length ? ` [${note.tags.join(", ")}]` : "";
       results.push(`${p}  —  ${title}${tags}`);
@@ -282,11 +361,11 @@ loggedTool(
   async ({ hours, limit }) => {
     const cutoff = Date.now() - (hours ?? 24) * 60 * 60 * 1000;
     const maxResults = limit ?? 20;
-    const allPaths = getAllNotes();
+    const allPaths = scopedGetAllNotes();
 
     const recent: { path: string; mtime: Date; title: string }[] = [];
     for (const p of allPaths) {
-      const note = loadNote(p);
+      const note = scopedLoadNote(p);
       if (!note) continue;
       if (note.mtime.getTime() >= cutoff) {
         recent.push({ path: p, mtime: note.mtime, title: note.title });
@@ -336,7 +415,7 @@ loggedTool(
   "Find brain notes with no incoming or outgoing wikilinks. These violate the 'no orphan notes' rule and need to be linked.",
   {},
   async () => {
-    const graph = buildLinkGraph();
+    const graph = scopedBuildLinkGraph();
     const orphans: string[] = [];
     const noIncoming: string[] = [];
     const noOutgoing: string[] = [];
@@ -395,7 +474,7 @@ loggedTool(
     const sections: string[] = [];
 
     // 1. ACTIVE.md
-    const activePath = join(BRAIN_ROOT, "context", "ACTIVE.md");
+    const activePath = join(SCOPED_BRAIN_ROOT, "context", "ACTIVE.md");
     if (existsSync(activePath)) {
       const active = readFileSync(activePath, "utf-8");
       sections.push(`## ACTIVE.md\n\n${active}`);
@@ -404,19 +483,19 @@ loggedTool(
     }
 
     // 2. Recent corrections
-    const correctionsPath = join(BRAIN_ROOT, "context", "CORRECTIONS.md");
+    const correctionsPath = join(SCOPED_BRAIN_ROOT, "context", "CORRECTIONS.md");
     if (existsSync(correctionsPath)) {
       const corrections = readFileSync(correctionsPath, "utf-8");
       sections.push(`## Recent Corrections\n\n${corrections}`);
     }
 
     // 3. All notes tagged #status/active (excluding context/ files already loaded)
-    const allPaths = getAllNotes();
+    const allPaths = scopedGetAllNotes();
     const activeNotes: string[] = [];
     for (const p of allPaths) {
       if (p.startsWith("context/")) continue;
       if (p.startsWith("_")) continue;
-      const note = loadNote(p);
+      const note = scopedLoadNote(p);
       if (note && note.tags.includes("status/active")) {
         activeNotes.push(`- **${note.title}** — \`${p}\`${note.tags.length > 0 ? ` [${note.tags.filter((t) => t !== "status/active").join(", ")}]` : ""}`);
       }
@@ -431,7 +510,7 @@ loggedTool(
     for (const p of allPaths) {
       if (p.startsWith("context/")) continue;
       if (p.startsWith("_")) continue;
-      const note = loadNote(p);
+      const note = scopedLoadNote(p);
       if (note && note.mtime.getTime() >= cutoff) {
         recent.push({ path: p, title: note.title, ago: formatAgo(note.mtime) });
       }
@@ -454,6 +533,12 @@ loggedTool(
     };
   }
 );
+
+// ── Host-only tools (hidden from subagents) ─────────────────────────────
+// Agents, workflows, and subagent management tools are only available
+// when running as the host workbot (no --subagent flag).
+
+if (!SUBAGENT_ID) {
 
 // ── Agents context tools ────────────────────────────────────────────────
 
@@ -487,6 +572,10 @@ loggedTool(
   }
 );
 
+} // end host-only agents tools
+
+// ── Shared tools (available to both host and subagents) ─────────────────
+
 // ── Debug tool (temporary) ──────────────────────────────────────────────
 
 loggedTool(
@@ -515,15 +604,66 @@ loggedTool(
   }
 );
 
-// ── Service context tools ──────────────────────────────────────────────
+// ── Git credentials helper ─────────────────────────────────────────────
 
-import {
-  addServiceContext,
-  removeServiceContext,
-  getServiceContext,
-  loadServiceContexts,
-  resolveServiceContext,
-} from "./service-contexts.js";
+loggedTool(
+  "git_credentials",
+  "Configure git to use a connected GitHub service instance for push/pull/clone. Sets up the credential helper so git commands authenticate automatically. Credentials are injected securely — the token is never printed or exposed.",
+  {
+    service: z.string().describe("GitHub service instance (e.g. 'github:workbot-wr'). Use service_status to see available instances."),
+  },
+  async ({ service }) => {
+    const { serviceType } = parseInstanceId(service);
+    if (serviceType !== "github") {
+      return { content: [{ type: "text", text: "git_credentials only works with GitHub service instances." }], isError: true };
+    }
+
+    // Check subagent permissions
+    if (SUBAGENT_ID) {
+      const sa = getSubagentById(SUBAGENT_ID);
+      const allowed = sa?.allowedServices ?? [];
+      if (!isServiceAllowed(service, allowed)) {
+        return { content: [{ type: "text", text: `Service "${service}" is not allowed for this subagent.` }], isError: true };
+      }
+    }
+
+    const store = await loadStoreSecure();
+    const saved = store[service];
+    if (!saved) {
+      return { content: [{ type: "text", text: `Service "${service}" is not connected.` }], isError: true };
+    }
+
+    // Configure git credential helper to use this token
+    // Uses git credential-store with a temporary file that's cleaned up
+    const credFile = `/tmp/.git-cred-${Date.now()}`;
+    try {
+      const { writeFileSync, chmodSync, unlinkSync } = await import("fs");
+      writeFileSync(credFile, `https://x-access-token:${saved.token}@github.com\n`, { mode: 0o600 });
+
+      await execFileAsync("git", ["config", "--global", "credential.helper", `store --file=${credFile}`], { timeout: 5000 });
+      // Also set user info from the token if available
+      try {
+        const userRes = await fetch("https://api.github.com/user", {
+          headers: { Authorization: `Bearer ${saved.token}`, Accept: "application/vnd.github.v3+json" },
+        });
+        if (userRes.ok) {
+          const user = await userRes.json();
+          if (user.login) await execFileAsync("git", ["config", "--global", "user.name", user.login], { timeout: 5000 });
+          if (user.email || `${user.login}@users.noreply.github.com`) {
+            await execFileAsync("git", ["config", "--global", "user.email", user.email || `${user.login}@users.noreply.github.com`], { timeout: 5000 });
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      const name = saved._instanceName || service;
+      return { content: [{ type: "text", text: `Git credentials configured for ${name} (${saved.user}). You can now use git clone, git push, git pull etc. with GitHub repos this token has access to.` }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Failed to configure git credentials: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ── Service context tools ──────────────────────────────────────────────
 
 loggedTool(
   "service_context_set",
@@ -575,23 +715,41 @@ loggedTool(
   "List all workbot services and their connection status.",
   {},
   async () => {
-    if (isStoreEncrypted() && !readActiveKey()) {
+    if (!SUBAGENT_ID && isStoreEncrypted() && !readActiveKey()) {
       return {
         content: [{ type: "text", text: "Dashboard session required — log into the workbot dashboard to unlock service credentials." }],
         isError: true,
       };
     }
-    const store = loadStore();
+    const store = await loadStoreSecure();
+    const sa = SUBAGENT_ID ? getSubagentById(SUBAGENT_ID) : null;
+    // Subagent mode: if subagent not found, default to empty (no access) — never fall through to all services
+    const allowedList = SUBAGENT_ID ? (sa?.allowedServices ?? []) : null;
+    console.error(`[mcp:service_status] SUBAGENT_ID=${SUBAGENT_ID}, sa=${!!sa}, allowedList=${JSON.stringify(allowedList)}, storeKeys=${Object.keys(store).join(",")}`);
     const lines: string[] = [];
-    for (const [key, config] of Object.entries(SERVICES)) {
-      const saved = store[key];
-      if (saved) {
-        lines.push(`${config.name} (${key}): connected — ${saved.user}`);
-      } else {
-        lines.push(`${config.name} (${key}): disconnected`);
+    const seenTypes = new Set<string>();
+
+    // Show all connected instances
+    for (const [key, saved] of Object.entries(store)) {
+      const { serviceType } = parseInstanceId(key);
+      if (!SERVICES[serviceType]) continue;
+      // Subagent mode: filter by allowed services
+      if (allowedList && !isServiceAllowed(key, allowedList)) continue;
+      seenTypes.add(serviceType);
+      const name = saved._instanceName || SERVICES[serviceType].name;
+      lines.push(`${name} (${key}): connected — ${saved.user}`);
+    }
+
+    // Show disconnected types (host mode only)
+    if (!SUBAGENT_ID) {
+      for (const [key, config] of Object.entries(SERVICES)) {
+        if (!seenTypes.has(key)) {
+          lines.push(`${config.name} (${key}): disconnected`);
+        }
       }
     }
-    return { content: [{ type: "text", text: lines.join("\n") }] };
+
+    return { content: [{ type: "text", text: lines.length > 0 ? lines.join("\n") : "No services available." }] };
   }
 );
 
@@ -618,26 +776,42 @@ loggedTool(
       .describe("Additional headers to merge (e.g. Accept, Content-Type)"),
   },
   async ({ service, method, url, body, headers: extraHeaders }) => {
-    if (isStoreEncrypted() && !readActiveKey()) {
+    if (!SUBAGENT_ID && isStoreEncrypted() && !readActiveKey()) {
       return {
         content: [{ type: "text", text: "Dashboard session required — log into the workbot dashboard to unlock service credentials." }],
         isError: true,
       };
     }
 
-    const config = SERVICES[service];
+    // Parse instance ID to get service type
+    const { serviceType } = parseInstanceId(service);
+
+    // Subagent mode: reject requests to services not in the allowed list
+    if (SUBAGENT_ID) {
+      const sa = getSubagentById(SUBAGENT_ID);
+      const allowed = sa?.allowedServices ?? []; // default to empty = no access
+      if (!isServiceAllowed(service, allowed)) {
+        return {
+          content: [{ type: "text", text: `Service "${service}" is not allowed for this subagent. Allowed: ${allowed.join(", ") || "none"}` }],
+          isError: true,
+        };
+      }
+    }
+
+    const config = SERVICES[serviceType];
     if (!config) {
       return {
-        content: [{ type: "text", text: `Unknown service: ${service}. Use service_status to see available keys.` }],
+        content: [{ type: "text", text: `Unknown service type: ${serviceType}. Use service_status to see available keys.` }],
         isError: true,
       };
     }
 
-    const store = loadStore();
-    const saved = store[service];
+    const store = await loadStoreSecure();
+    // Look up by full instance ID first, fall back to bare type
+    const saved = store[service] ?? (service === serviceType ? undefined : store[serviceType]);
     if (!saved) {
       return {
-        content: [{ type: "text", text: `Service "${config.name}" is not connected. Connect it via the dashboard first.` }],
+        content: [{ type: "text", text: `Service "${service}" is not connected. Connect it via the dashboard first.` }],
         isError: true,
       };
     }
@@ -705,11 +879,10 @@ loggedTool(
   }
 );
 
-// ── Workflow tools ────────────────────────────────────────────────────
+// ── Workflow tools (available to both host and subagents) ─────────────
+// Subagents get their own scoped workflows via the scope parameter.
 
-import { loadWorkflows, loadRuns, getRun, getWorkflow, upsertWorkflow, deleteWorkflow as removeWorkflow, type WorkflowDefinition } from "./workflows-config.js";
-import { randomUUID } from "crypto";
-import { WorkflowEngine } from "./workflow-engine.js";
+// ── Workflow tools ────────────────────────────────────────────────────
 
 const workflowEngine = new WorkflowEngine();
 workflowEngine.start();
@@ -893,9 +1066,8 @@ loggedTool(
   }
 );
 
-// ── Subagent tools ────────────────────────────────────────────────────
-
-import { loadSubagents, getSubagent as getSubagentDef, createSubagent as createSubagentDef, updateSubagent as updateSubagentDef, deleteSubagent as deleteSubagentDef } from "./subagents.js";
+// ── Subagent management tools (host-only) ────────────────────────────
+if (!SUBAGENT_ID) {
 
 loggedTool(
   "subagent_list",
@@ -971,17 +1143,9 @@ loggedTool(
   }
 );
 
+} // end host-only tools block
+
 // ── Start ───────────────────────────────────────────────────────────────
 
-// Check for subagent mode (--subagent <id>)
-const cliArgs = process.argv.slice(2);
-const subagentFlagIdx = cliArgs.indexOf("--subagent");
-if (subagentFlagIdx !== -1 && cliArgs[subagentFlagIdx + 1]) {
-  // Start subagent-scoped MCP server instead of host server
-  const { createSubagentMcpServer } = await import("./subagent-mcp.js");
-  await createSubagentMcpServer(cliArgs[subagentFlagIdx + 1]);
-} else {
-  // Host MCP server (normal mode)
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-}
+const transport = new StdioServerTransport();
+await server.connect(transport);

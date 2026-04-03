@@ -4,7 +4,70 @@
       "Bash(qmd update:*)",
       "Bash(qmd embed:*)",
       "mcp__workbot__brain_get",
-      "mcp__workbot__brain_write"
+      "mcp__workbot__brain_write",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(npm --version)",
+      "Bash(wsl -e bash -c *)",
+      "Bash(wsl -u claude -e bash -c *)",
+      "Bash(wsl -u claude -- bash -c *)",
+      "mcp__workbot__agents_read",
+      "mcp__workbot__subagent_list",
+      "mcp__workbot__brain_list",
+      "mcp__workbot__service_status",
+      "mcp__workbot__brain_search",
+      "mcp__workbot__brain_vsearch",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)",
+      "Bash(gh auth:*)",
+      "Read(//home/workbot/**)",
+      "Bash(curl -s http://localhost:3001/api/health)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(npm run:*)",
+      "mcp__workbot__service_request",
+      "Bash(curl -sk https://localhost:3001/api/health)",
+      "Bash(curl -sk https://localhost:3001/api/services)",
+      "Bash(curl -s http://localhost:3001/api/services)",
+      "Bash(git rev-list:*)",
+      "Bash(git bundle:*)",
+      "Read(//tmp/**)",
+      "Bash(git diff-tree:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git archive:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx tsx:*)",
+      "Bash(claude mcp:*)",
+      "mcp__workbot__git_credentials"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "workbot"
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"BRAIN BOOT: You MUST read brain context/ACTIVE.md via brain_get BEFORE doing anything else. Also check AGENTS.md for new agent reports to assimilate. Do not skip this step.\"}}'",
+            "statusMessage": "Loading brain context..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"Stop\",\"additionalContext\":\"BRAIN SAVE: Before ending, you MUST: 1) Update brain context/ACTIVE.md with current session state via brain_write. 2) Write any new reusable knowledge to the appropriate brain folder (decisions/, patterns/, corrections/, entities/, projects/). 3) Update AGENTS.md if active context changed. Do NOT skip this step.\"}}'",
+            "statusMessage": "Saving brain context..."
+          }
+        ]
+      }
     ]
   }
 }

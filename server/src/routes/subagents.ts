@@ -13,7 +13,9 @@ import {
   deleteSubagent,
   ensureBrainDir,
   getSubagentClaudeHome,
+  getSubagentLinuxUser,
 } from "../subagents.js";
+import { STORE_DIR } from "../paths.js";
 
 const execFileAsync = promisify(execFile);
 import { SERVICES, loadStore } from "../services.js";
@@ -33,8 +35,21 @@ import cron from "node-cron";
 
 const router = Router();
 
-// Active spawned sessions
-const activeSessions = new Map<string, { pid: number; startedAt: string }>();
+// Active spawned sessions (exported for auto-spawn registration)
+export const activeSessions = new Map<string, { pid: number; startedAt: string }>();
+
+// Active web terminals (ttyd instances)
+const activeTerminals = new Map<string, { pid: number; port: number; startedAt: string }>();
+const TERMINAL_PORT_MIN = 7700;
+const TERMINAL_PORT_MAX = 7719;
+
+function getNextTerminalPort(): number | null {
+  const usedPorts = new Set([...activeTerminals.values()].map((t) => t.port));
+  for (let p = TERMINAL_PORT_MIN; p <= TERMINAL_PORT_MAX; p++) {
+    if (!usedPorts.has(p)) return p;
+  }
+  return null;
+}
 
 // GET /api/subagents
 router.get("/", (_req, res) => {
@@ -77,16 +92,98 @@ router.put("/:id", (req, res) => {
 
 // DELETE /api/subagents/:id
 router.delete("/:id", (req, res) => {
-  const deleteBrain = req.query.deleteBrain === "true";
-  if (!deleteSubagent(req.params.id, deleteBrain)) {
-    return res.status(404).json({ error: "Subagent not found" });
-  }
-  // Kill active session if any
-  const session = activeSessions.get(req.params.id);
-  if (session) {
-    try { process.kill(session.pid); } catch { /* already dead */ }
+  try {
+    const result = deleteSubagent(req.params.id);
+
+    // Clean up tracked sessions/terminals (processes already killed by deleteSubagent)
     activeSessions.delete(req.params.id);
+    activeTerminals.delete(req.params.id);
+
+    res.json({
+      ok: true,
+      archived: result.archived,
+      archivePath: result.archivePath,
+    });
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
   }
+});
+
+// POST /api/subagents/auto-spawn — spawn all subagents with autoSpawn=true
+router.post("/auto-spawn", (_req, res) => {
+  const subagents = loadSubagents();
+  const results: { id: string; spawned: boolean; error?: string }[] = [];
+
+  for (const s of subagents) {
+    if (!s.autoSpawn || !s.enabled) continue;
+
+    // Check if already running
+    const existing = activeSessions.get(s.id);
+    if (existing) {
+      try {
+        process.kill(existing.pid, 0);
+        results.push({ id: s.id, spawned: false, error: "already running" });
+        continue;
+      } catch {
+        activeSessions.delete(s.id);
+      }
+    }
+
+    // Reuse the spawn logic by making an internal request
+    try {
+      const cwd = resolve(PROJECT_ROOT, "workbot-brain", "subagents", s.id);
+      const args = ["remote-control", "--name", s.name, "--spawn", "same-dir", "--verbose"];
+      if (s.bypassPermissions) {
+        args.push("--permission-mode", "bypassPermissions");
+      } else {
+        args.push("--permission-mode", "auto");
+      }
+
+      const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
+      if (s.claudeAuth.mode === "oauth") {
+        spawnEnv.HOME = getSubagentClaudeHome(s.id);
+      }
+
+      const linuxUser = getSubagentLinuxUser(s.id);
+      const envArgs: string[] = [];
+      if (spawnEnv.HOME) envArgs.push(`HOME=${spawnEnv.HOME}`);
+      envArgs.push(`PATH=${spawnEnv.PATH || "/home/workbot/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}`);
+
+      const envStr = envArgs.map((e) => `export ${e}`).join(" && ");
+      const claudeCmd = `${envStr} && cd ${cwd} && exec claude ${args.join(" ")}`;
+
+      const proc = spawn("runuser", ["-u", linuxUser, "--", "script", "-qfc", claudeCmd, "/dev/null"], {
+        cwd, stdio: "ignore", detached: true,
+      });
+      proc.unref();
+      activeSessions.set(s.id, { pid: proc.pid!, startedAt: new Date().toISOString() });
+      proc.on("exit", () => { activeSessions.delete(s.id); });
+      results.push({ id: s.id, spawned: true });
+    } catch (err: any) {
+      results.push({ id: s.id, spawned: false, error: err.message });
+    }
+  }
+
+  res.json({ results });
+});
+
+// POST /api/subagents/:id/stop — kill all processes for this subagent
+router.post("/:id/stop", (req, res) => {
+  const s = getSubagent(req.params.id);
+  if (!s) return res.status(404).json({ error: "Subagent not found" });
+
+  const linuxUser = getSubagentLinuxUser(s.id);
+
+  // Kill all processes running as this subagent's user
+  try {
+    const { execFileSync } = require("child_process");
+    execFileSync("pkill", ["-9", "-u", linuxUser], { stdio: "pipe" });
+  } catch { /* no processes or user doesn't exist */ }
+
+  // Clean up tracked sessions and terminals
+  activeSessions.delete(s.id);
+  activeTerminals.delete(s.id);
+
   res.json({ ok: true });
 });
 
@@ -120,9 +217,11 @@ router.post("/:id/spawn", (req, res) => {
     "--verbose",
   ];
 
-  // Add bypass permissions if enabled on the subagent
+  // Add permission mode — bypass if enabled, otherwise auto
   if (s.bypassPermissions) {
     args.push("--permission-mode", "bypassPermissions");
+  } else {
+    args.push("--permission-mode", "auto");
   }
 
   // Set HOME for oauth mode so Claude uses subagent-specific credentials
@@ -133,11 +232,22 @@ router.post("/:id/spawn", (req, res) => {
     spawnEnv.HOME = getSubagentClaudeHome(s.id);
   }
 
-  const proc = spawn("claude", args, {
+  // Run as the subagent's isolated Linux user via runuser (container runs as root)
+  const linuxUser = getSubagentLinuxUser(s.id);
+
+  // Build env args to pass through runuser (which doesn't inherit parent env)
+  const envArgs: string[] = [];
+  if (spawnEnv.HOME) envArgs.push(`HOME=${spawnEnv.HOME}`);
+  envArgs.push(`PATH=${spawnEnv.PATH || "/home/workbot/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}`);
+
+  // Use `script` to allocate a PTY — remote-control child sessions need one
+  const envStr = envArgs.map((e) => `export ${e}`).join(" && ");
+  const claudeCmd = `${envStr} && cd ${cwd} && exec claude ${args.join(" ")}`;
+
+  const proc = spawn("runuser", ["-u", linuxUser, "--", "script", "-qfc", claudeCmd, "/dev/null"], {
     cwd,
-    stdio: "pipe",
+    stdio: "ignore",
     detached: true,
-    env: spawnEnv,
   });
 
   proc.unref();
@@ -283,6 +393,88 @@ router.get("/:id/workflows/:wfId/runs/:runId", (req, res) => {
   res.json(run);
 });
 
+// ── Subagent Web Terminal (ttyd) ───────────────────────────────────────
+
+// POST /api/subagents/:id/terminal — Start or get existing ttyd instance
+router.post("/:id/terminal", (req, res) => {
+  const s = getSubagent(req.params.id);
+  if (!s) return res.status(404).json({ error: "Subagent not found" });
+
+  // Check if already running
+  const existing = activeTerminals.get(s.id);
+  if (existing) {
+    try {
+      process.kill(existing.pid, 0);
+      const host = req.headers.host?.split(":")[0] ?? "localhost";
+      return res.json({ url: `http://${host}:${existing.port}`, port: existing.port, pid: existing.pid, alreadyRunning: true });
+    } catch {
+      activeTerminals.delete(s.id);
+    }
+  }
+
+  const port = getNextTerminalPort();
+  if (!port) return res.status(503).json({ error: "No terminal ports available (max 20)" });
+
+  const linuxUser = getSubagentLinuxUser(s.id);
+  const brainDir = resolve(PROJECT_ROOT, "workbot-brain", "subagents", s.id);
+  const claudeHome = getSubagentClaudeHome(s.id);
+
+  // Spawn ttyd as the subagent's Linux user, scoped to their brain dir
+  const proc = spawn("runuser", [
+    "-u", linuxUser, "--",
+    "ttyd", "-p", String(port), "-W",
+    "--cwd", brainDir,
+    "bash", "-c",
+    `export HOME=${claudeHome} && export PATH="/home/workbot/.local/bin:$PATH" && cd ${brainDir} && exec bash`,
+  ], {
+    stdio: "pipe",
+    detached: true,
+  });
+
+  proc.unref();
+
+  activeTerminals.set(s.id, {
+    pid: proc.pid!,
+    port,
+    startedAt: new Date().toISOString(),
+  });
+
+  proc.on("exit", () => {
+    activeTerminals.delete(s.id);
+  });
+
+  // Give ttyd a moment to bind the port
+  setTimeout(() => {
+    const host = req.headers.host?.split(":")[0] ?? "localhost";
+    res.json({ url: `http://${host}:${port}`, port, pid: proc.pid });
+  }, 500);
+});
+
+// GET /api/subagents/:id/terminal — Check terminal status
+router.get("/:id/terminal", (req, res) => {
+  const existing = activeTerminals.get(req.params.id);
+  if (!existing) return res.json({ active: false });
+
+  try {
+    process.kill(existing.pid, 0);
+    const host = req.headers.host?.split(":")[0] ?? "localhost";
+    res.json({ active: true, url: `http://${host}:${existing.port}`, port: existing.port });
+  } catch {
+    activeTerminals.delete(req.params.id);
+    res.json({ active: false });
+  }
+});
+
+// DELETE /api/subagents/:id/terminal — Kill terminal
+router.delete("/:id/terminal", (req, res) => {
+  const existing = activeTerminals.get(req.params.id);
+  if (!existing) return res.json({ ok: true });
+
+  try { process.kill(existing.pid); } catch { /* already dead */ }
+  activeTerminals.delete(req.params.id);
+  res.json({ ok: true });
+});
+
 // ── Subagent Claude Auth ────────────────────────────────────────────────
 
 // Active login processes (device-code flow)
@@ -294,7 +486,8 @@ router.post("/:id/auth/login", (req, res) => {
   if (!s) return res.status(404).json({ error: "Subagent not found" });
 
   const home = getSubagentClaudeHome(s.id);
-  const proc = spawn("claude", ["auth", "login", "--claudeai"], {
+  const linuxUser = getSubagentLinuxUser(s.id);
+  const proc = spawn("runuser", ["-u", linuxUser, "--", "claude", "auth", "login", "--claudeai"], {
     env: { ...process.env, HOME: home },
     stdio: ["pipe", "pipe", "pipe"],
   });
