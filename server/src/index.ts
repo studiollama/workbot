@@ -154,8 +154,8 @@ app.get("/api/internal/store", (req, res) => {
   res.json(store);
 });
 
-// Clean up stale active key from previous crash
-deleteActiveKey();
+// NOTE: Active key is NOT deleted on startup — it persists across tsx watch restarts.
+// It's only deleted on explicit logout or container stop (SIGINT/SIGTERM).
 
 // HTTPS server
 const { key, cert } = await ensureCerts();
