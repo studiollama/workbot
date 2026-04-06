@@ -1,308 +1,292 @@
 import { Router } from "express";
 import { spawn } from "child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, rmSync, mkdirSync } from "fs";
 import { join, basename } from "path";
-import { loadDevConfig, saveDevConfig, parseGitHubUrl } from "../dev-config.js";
-import { loadStore, SERVICES, PROJECT_ROOT } from "../services.js";
+import { loadDevConfig, saveDevConfig, addProject, updateProject, removeProject, getProject, parseGitHubUrl, type DevProject } from "../dev-config.js";
+import { loadStore, SERVICES, PROJECT_ROOT, parseInstanceId } from "../services.js";
 
 const router = Router();
-const DEV_DIR = join(PROJECT_ROOT, "development");
+const DEV_BASE = join(PROJECT_ROOT, "development");
 
-// Helper: fetch from GitHub API using stored token
-async function githubFetch(path: string): Promise<Response> {
+// Ensure development base dir exists
+if (!existsSync(DEV_BASE)) mkdirSync(DEV_BASE, { recursive: true });
+
+// Helper: find a GitHub token from any connected github instance
+function getGitHubToken(): string | null {
   const store = loadStore();
-  const gh = store.github;
-  if (!gh) throw new Error("GitHub not connected");
+  for (const [key, val] of Object.entries(store)) {
+    const { serviceType } = parseInstanceId(key);
+    if (serviceType === "github" && val.token) return val.token;
+  }
+  return null;
+}
+
+// Helper: fetch from GitHub API
+async function githubFetch(path: string): Promise<Response> {
+  const token = getGitHubToken();
+  if (!token) throw new Error("No GitHub service connected");
   return fetch(`https://api.github.com${path}`, {
-    headers: SERVICES.github.authHeader(gh.token),
+    headers: { Authorization: `Bearer ${token}`, "User-Agent": "workbot", Accept: "application/vnd.github.v3+json" },
   });
 }
 
-// GET /api/dev/status
+// Check if old single-dev-folder exists (needs migration)
+function hasLegacyDevFolder(): boolean {
+  return existsSync(join(DEV_BASE, ".git")) && !existsSync(join(DEV_BASE, ".git", ".."));
+}
+
+// GET /api/dev/status — list all projects + github connection status
 router.get("/status", (_req, res) => {
   const config = loadDevConfig();
-  const store = loadStore();
+  // Detect legacy single-folder setup: development/.git exists but no project subfolders
+  const needsMigration = existsSync(join(DEV_BASE, ".git"));
   res.json({
-    ...config,
-    githubConnected: !!store.github,
+    projects: config.projects,
+    githubConnected: !!getGitHubToken(),
+    needsMigration,
   });
 });
 
-// POST /api/dev/repo — set repo URL
-router.post("/repo", (req, res) => {
-  const { repoUrl } = req.body;
-  if (!repoUrl || typeof repoUrl !== "string") {
-    return res.status(400).json({ error: "repoUrl is required" });
+// POST /api/dev/migrate — convert old single-dev-folder to multi-project
+router.post("/migrate", (_req, res) => {
+  if (!existsSync(join(DEV_BASE, ".git"))) {
+    return res.json({ ok: false, message: "No legacy development folder found" });
   }
+
+  try {
+    // Read the git remote to get the repo URL
+    const { execFileSync } = require("child_process");
+    let repoUrl = "";
+    try {
+      repoUrl = execFileSync("git", ["config", "--get", "remote.origin.url"], { cwd: DEV_BASE, encoding: "utf8" }).trim();
+      // Strip any token from the URL
+      repoUrl = repoUrl.replace(/x-access-token:[^@]+@/, "");
+    } catch {}
+
+    const parsed = repoUrl ? parseGitHubUrl(repoUrl) : null;
+    const projectName = parsed?.repo || "legacy-project";
+    const projectId = projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const projectDir = join(DEV_BASE, projectId);
+
+    // Move the contents into a subfolder
+    // First, create a temp dir, move everything there, then rename
+    const tmpDir = join(DEV_BASE, "__migration_tmp__");
+    mkdirSync(tmpDir, { recursive: true });
+
+    // Move all files except the temp dir itself
+    const items = readdirSync(DEV_BASE).filter((f) => f !== "__migration_tmp__" && f !== projectId);
+    for (const item of items) {
+      const { renameSync } = require("fs");
+      renameSync(join(DEV_BASE, item), join(tmpDir, item));
+    }
+
+    // Rename temp to project dir
+    const { renameSync: ren } = require("fs");
+    ren(tmpDir, projectDir);
+
+    // Add to config
+    const project = {
+      id: projectId,
+      name: projectName,
+      repoUrl: repoUrl || "unknown",
+      owner: parsed?.owner || "unknown",
+      repo: parsed?.repo || projectName,
+      cloneStatus: "cloned" as const,
+      cloneError: null,
+      lastClonedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    addProject(project);
+
+    res.json({ ok: true, project });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
+// POST /api/dev/projects — add a new project
+router.post("/projects", (req, res) => {
+  const { repoUrl, name } = req.body;
+  if (!repoUrl || typeof repoUrl !== "string") return res.status(400).json({ error: "repoUrl is required" });
+
   const parsed = parseGitHubUrl(repoUrl);
-  if (!parsed) {
-    return res.status(400).json({ error: "Invalid GitHub URL" });
-  }
-  saveDevConfig({
+  if (!parsed) return res.status(400).json({ error: "Invalid GitHub URL" });
+
+  const id = (name || parsed.repo).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  if (!id) return res.status(400).json({ error: "Invalid project name" });
+  if (getProject(id)) return res.status(409).json({ error: `Project "${id}" already exists` });
+
+  const project: DevProject = {
+    id,
+    name: name || parsed.repo,
     repoUrl,
     owner: parsed.owner,
     repo: parsed.repo,
     cloneStatus: "idle",
     cloneError: null,
-  });
-  res.json({ ok: true });
-});
-
-// DELETE /api/dev/repo — remove repo config
-router.delete("/repo", (_req, res) => {
-  saveDevConfig({
-    repoUrl: null,
-    owner: null,
-    repo: null,
-    cloneStatus: "idle",
-    cloneError: null,
     lastClonedAt: null,
-    analysisStatus: "idle",
-    analysisError: null,
-  });
+    createdAt: new Date().toISOString(),
+  };
+
+  addProject(project);
+  res.status(201).json(project);
+});
+
+// DELETE /api/dev/projects/:id — remove project + cloned files
+router.delete("/projects/:id", (req, res) => {
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  // Remove cloned directory
+  const projectDir = join(DEV_BASE, project.id);
+  if (existsSync(projectDir)) rmSync(projectDir, { recursive: true, force: true });
+
+  removeProject(project.id);
   res.json({ ok: true });
 });
 
-// POST /api/dev/clone — start cloning the repo
-router.post("/clone", (_req, res) => {
-  const config = loadDevConfig();
-  const store = loadStore();
+// POST /api/dev/projects/:id/clone — clone or pull
+router.post("/projects/:id/clone", (req, res) => {
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
 
-  if (!store.github) {
-    return res.status(400).json({ error: "GitHub not connected" });
-  }
-  if (!config.repoUrl) {
-    return res.status(400).json({ error: "No repo URL configured" });
-  }
+  const token = getGitHubToken();
+  if (!token) return res.status(400).json({ error: "No GitHub service connected" });
 
-  // Build authenticated clone URL
-  const token = store.github.token;
-  const cloneUrl = config.repoUrl.replace(
-    "https://github.com/",
-    `https://x-access-token:${token}@github.com/`
-  );
+  const cloneUrl = project.repoUrl.replace("https://github.com/", `https://x-access-token:${token}@github.com/`);
+  const projectDir = join(DEV_BASE, project.id);
+  const isUpdate = existsSync(join(projectDir, ".git"));
 
-  // If already cloned, do git pull instead
-  const isUpdate = existsSync(join(DEV_DIR, ".git"));
-
-  saveDevConfig({ cloneStatus: "cloning", cloneError: null });
+  updateProject(project.id, { cloneStatus: "cloning", cloneError: null });
   res.json({ ok: true, action: isUpdate ? "pulling" : "cloning" });
 
   if (isUpdate) {
-    const pull = spawn("git", ["pull"], {
-      cwd: DEV_DIR,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const pull = spawn("git", ["pull"], { cwd: projectDir, stdio: ["pipe", "pipe", "pipe"] });
     let stderr = "";
     pull.stderr.on("data", (d) => (stderr += d.toString()));
     pull.on("close", (code) => {
-      if (code === 0) {
-        saveDevConfig({ cloneStatus: "cloned", lastClonedAt: new Date().toISOString() });
-      } else {
-        saveDevConfig({ cloneStatus: "error", cloneError: stderr.slice(0, 300) });
-      }
+      updateProject(project.id, code === 0
+        ? { cloneStatus: "cloned", lastClonedAt: new Date().toISOString() }
+        : { cloneStatus: "error", cloneError: stderr.replace(/x-access-token:[^@]+@/g, "***@").slice(0, 300) });
     });
   } else {
-    const clone = spawn("git", ["clone", "--depth", "1", cloneUrl, "development"], {
-      cwd: PROJECT_ROOT,
-      stdio: ["pipe", "pipe", "pipe"],
+    mkdirSync(DEV_BASE, { recursive: true });
+    const clone = spawn("git", ["clone", "--depth", "1", cloneUrl, project.id], {
+      cwd: DEV_BASE, stdio: ["pipe", "pipe", "pipe"],
     });
     let stderr = "";
     clone.stderr.on("data", (d) => (stderr += d.toString()));
     clone.on("close", (code) => {
-      if (code === 0) {
-        saveDevConfig({ cloneStatus: "cloned", lastClonedAt: new Date().toISOString() });
-      } else {
-        // Scrub token from error message
-        const cleanErr = stderr.replace(/x-access-token:[^@]+@/g, "***@");
-        saveDevConfig({ cloneStatus: "error", cloneError: cleanErr.slice(0, 300) });
-      }
+      updateProject(project.id, code === 0
+        ? { cloneStatus: "cloned", lastClonedAt: new Date().toISOString() }
+        : { cloneStatus: "error", cloneError: stderr.replace(/x-access-token:[^@]+@/g, "***@").slice(0, 300) });
     });
   }
 });
 
-// GET /api/dev/commits — recent commits from GitHub API
-router.get("/commits", async (_req, res) => {
-  const config = loadDevConfig();
-  if (!config.owner || !config.repo) {
-    return res.status(400).json({ error: "No repo configured" });
-  }
+// GET /api/dev/projects/:id/commits
+router.get("/projects/:id/commits", async (req, res) => {
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
   try {
-    const resp = await githubFetch(`/repos/${config.owner}/${config.repo}/commits?per_page=10`);
+    const resp = await githubFetch(`/repos/${project.owner}/${project.repo}/commits?per_page=10`);
     if (!resp.ok) return res.status(resp.status).json({ error: "GitHub API error" });
     const data = await resp.json();
-    const commits = (data as any[]).map((c) => ({
+    res.json((data as any[]).map((c) => ({
       sha: c.sha?.substring(0, 7),
       message: c.commit?.message?.split("\n")[0]?.substring(0, 80),
       author: c.commit?.author?.name ?? c.author?.login ?? "unknown",
       date: c.commit?.author?.date,
-    }));
-    res.json(commits);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
+    })));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/dev/issues — open issues from GitHub API
-router.get("/issues", async (_req, res) => {
-  const config = loadDevConfig();
-  if (!config.owner || !config.repo) {
-    return res.status(400).json({ error: "No repo configured" });
-  }
+// GET /api/dev/projects/:id/issues
+router.get("/projects/:id/issues", async (req, res) => {
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
   try {
-    const resp = await githubFetch(
-      `/repos/${config.owner}/${config.repo}/issues?state=open&per_page=20`
-    );
+    const resp = await githubFetch(`/repos/${project.owner}/${project.repo}/issues?state=open&per_page=20`);
     if (!resp.ok) return res.status(resp.status).json({ error: "GitHub API error" });
     const data = await resp.json();
-    const issues = (data as any[])
-      .filter((i) => !i.pull_request) // exclude PRs
-      .map((i) => ({
-        number: i.number,
-        title: i.title?.substring(0, 100),
-        state: i.state,
-        user: i.user?.login ?? "unknown",
-        labels: (i.labels ?? []).map((l: any) => l.name),
-        created_at: i.created_at,
-      }));
-    res.json(issues);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
+    res.json((data as any[]).filter((i) => !i.pull_request).map((i) => ({
+      number: i.number, title: i.title?.substring(0, 100), state: i.state,
+      user: i.user?.login ?? "unknown", labels: (i.labels ?? []).map((l: any) => l.name), created_at: i.created_at,
+    })));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/dev/pulls — open PRs from GitHub API
-router.get("/pulls", async (_req, res) => {
-  const config = loadDevConfig();
-  if (!config.owner || !config.repo) {
-    return res.status(400).json({ error: "No repo configured" });
-  }
+// GET /api/dev/projects/:id/pulls
+router.get("/projects/:id/pulls", async (req, res) => {
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
   try {
-    const resp = await githubFetch(
-      `/repos/${config.owner}/${config.repo}/pulls?state=open&per_page=20`
-    );
+    const resp = await githubFetch(`/repos/${project.owner}/${project.repo}/pulls?state=open&per_page=20`);
     if (!resp.ok) return res.status(resp.status).json({ error: "GitHub API error" });
     const data = await resp.json();
-    const pulls = (data as any[]).map((p) => ({
-      number: p.number,
-      title: p.title?.substring(0, 100),
-      state: p.state,
-      user: p.user?.login ?? "unknown",
-      head: p.head?.ref,
-      base: p.base?.ref,
-      created_at: p.created_at,
-    }));
-    res.json(pulls);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
+    res.json((data as any[]).map((p) => ({
+      number: p.number, title: p.title?.substring(0, 100), state: p.state,
+      user: p.user?.login ?? "unknown", head: p.head?.ref, base: p.base?.ref, created_at: p.created_at,
+    })));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/dev/env — list .env files and their entries
-router.get("/env", (_req, res) => {
-  if (!existsSync(DEV_DIR)) {
-    return res.json([]);
-  }
-  const reveal = _req.query.reveal === "true";
+// GET /api/dev/projects/:id/env — .env files
+router.get("/projects/:id/env", (req, res) => {
+  const project = getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  const projectDir = join(DEV_BASE, project.id);
+  if (!existsSync(projectDir)) return res.json([]);
+  const reveal = req.query.reveal === "true";
   try {
-    const files = readdirSync(DEV_DIR).filter((f) => f.startsWith(".env"));
+    const files = readdirSync(projectDir).filter((f) => f.startsWith(".env"));
     const result = files.map((filename) => {
-      const content = readFileSync(join(DEV_DIR, filename), "utf-8");
-      const entries = content
-        .split("\n")
-        .filter((line) => line.trim() && !line.trim().startsWith("#"))
-        .map((line) => {
-          const eqIdx = line.indexOf("=");
-          if (eqIdx === -1) return { key: line.trim(), value: "" };
-          const key = line.substring(0, eqIdx).trim();
-          const value = line.substring(eqIdx + 1).trim();
-          const isExample = filename.includes("example");
-          return {
-            key,
-            value: reveal || isExample ? value : "********",
-          };
-        });
+      const content = readFileSync(join(projectDir, filename), "utf-8");
+      const entries = content.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#")).map((l) => {
+        const eq = l.indexOf("=");
+        if (eq === -1) return { key: l.trim(), value: "" };
+        const key = l.substring(0, eq).trim();
+        const value = l.substring(eq + 1).trim();
+        return { key, value: reveal || filename.includes("example") ? value : "********" };
+      });
       return { filename, entries };
     });
     res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// PUT /api/dev/env — update a .env file
-router.put("/env", (req, res) => {
-  const { file, entries } = req.body;
-  if (!file || !Array.isArray(entries)) {
-    return res.status(400).json({ error: "file and entries are required" });
-  }
-  // Security: validate filename (no path traversal)
-  const safe = basename(file);
-  if (!safe.startsWith(".env")) {
-    return res.status(400).json({ error: "Invalid filename" });
-  }
-  const filePath = join(DEV_DIR, safe);
-  if (!existsSync(DEV_DIR)) {
-    return res.status(400).json({ error: "Development directory not found" });
-  }
-  try {
-    const content = entries.map((e: { key: string; value: string }) => `${e.key}=${e.value}`).join("\n") + "\n";
-    writeFileSync(filePath, content);
-    res.json({ ok: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// ── Legacy routes (backward compat for old single-repo API) ──────────
 
-// POST /api/dev/analyze — kick off Claude Code analysis session
-router.post("/analyze", (_req, res) => {
+router.get("/commits", async (_req, res) => {
   const config = loadDevConfig();
-  if (config.cloneStatus !== "cloned") {
-    return res.status(400).json({ error: "Repo not cloned yet" });
-  }
-  if (config.analysisStatus === "running") {
-    return res.status(400).json({ error: "Analysis already running" });
-  }
-
-  saveDevConfig({ analysisStatus: "running", analysisError: null });
-  res.json({ ok: true });
-
-  const prompt = `You are analyzing a codebase in the ./development/ directory for the workbot system.
-
-Your task:
-1. Read the key files: README.md, CLAUDE.md, package.json, and scan the source directory structure
-2. Identify: tech stack, architecture patterns, key dependencies, API structure, database setup
-3. Write a concise knowledge note to workbot-brain/knowledge/projects/ summarizing what you found
-4. The note should follow the brain template format with YAML frontmatter (tags: #project, #status/active)
-5. Include [[wikilinks]] to related brain notes if applicable
-6. After writing, run: node "${join(PROJECT_ROOT, "node_modules/@tobilu/qmd/dist/cli/qmd.js").replace(/\\/g, "/")}" update --dir "${join(PROJECT_ROOT, "workbot-brain").replace(/\\/g, "/")}"
-
-Keep the note practical — focus on what a developer or AI agent needs to know to work on this codebase.`;
-
-  const claude = spawn("claude", ["--print", prompt], {
-    cwd: PROJECT_ROOT,
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: true,
-  });
-
-  let stderr = "";
-  claude.stderr.on("data", (d) => (stderr += d.toString()));
-  claude.on("close", (code) => {
-    if (code === 0) {
-      saveDevConfig({ analysisStatus: "done" });
-    } else {
-      saveDevConfig({
-        analysisStatus: "error",
-        analysisError: stderr.slice(0, 300) || `Exit code ${code}`,
-      });
-    }
-  });
-  claude.on("error", (err) => {
-    saveDevConfig({
-      analysisStatus: "error",
-      analysisError: err.message.slice(0, 300),
-    });
-  });
+  const first = config.projects[0];
+  if (!first) return res.json([]);
+  const resp = await githubFetch(`/repos/${first.owner}/${first.repo}/commits?per_page=10`).catch(() => null);
+  if (!resp?.ok) return res.json([]);
+  const data = await resp.json();
+  res.json((data as any[]).map((c) => ({ sha: c.sha?.substring(0, 7), message: c.commit?.message?.split("\n")[0]?.substring(0, 80), author: c.commit?.author?.name ?? "unknown", date: c.commit?.author?.date })));
 });
+
+router.get("/issues", async (_req, res) => {
+  const config = loadDevConfig();
+  const first = config.projects[0];
+  if (!first) return res.json([]);
+  const resp = await githubFetch(`/repos/${first.owner}/${first.repo}/issues?state=open&per_page=20`).catch(() => null);
+  if (!resp?.ok) return res.json([]);
+  const data = await resp.json();
+  res.json((data as any[]).filter((i) => !i.pull_request).map((i) => ({ number: i.number, title: i.title?.substring(0, 100), state: i.state, user: i.user?.login ?? "unknown", labels: (i.labels ?? []).map((l: any) => l.name), created_at: i.created_at })));
+});
+
+router.get("/pulls", async (_req, res) => {
+  const config = loadDevConfig();
+  const first = config.projects[0];
+  if (!first) return res.json([]);
+  const resp = await githubFetch(`/repos/${first.owner}/${first.repo}/pulls?state=open&per_page=20`).catch(() => null);
+  if (!resp?.ok) return res.json([]);
+  const data = await resp.json();
+  res.json((data as any[]).map((p) => ({ number: p.number, title: p.title?.substring(0, 100), state: p.state, user: p.user?.login ?? "unknown", head: p.head?.ref, base: p.base?.ref, created_at: p.created_at })));
+});
+
+router.get("/env", (_req, res) => res.json([]));
 
 export default router;

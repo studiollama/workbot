@@ -10,11 +10,19 @@ interface SubagentSummary {
   brainPath: string;
   claudeAuth: { mode: string };
   autoSpawn?: boolean;
+  commonReadOnly?: boolean;
   session: { pid: number; startedAt: string } | null;
+}
+
+interface SubagentUserInfo {
+  username: string;
+  subagentId: string;
+  keyHolder: boolean;
 }
 
 export default function SubagentsPanel() {
   const [subagents, setSubagents] = useState<SubagentSummary[]>([]);
+  const [users, setUsers] = useState<SubagentUserInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -22,11 +30,13 @@ export default function SubagentsPanel() {
 
   const fetchSubagents = useCallback(async () => {
     try {
-      const [subs, status] = await Promise.all([
+      const [subs, status, userList] = await Promise.all([
         api.getSubagents(),
         api.getServicesStatus(),
+        api.listUsers().catch(() => [] as SubagentUserInfo[]),
       ]);
       setSubagents(subs);
+      setUsers(userList);
       setConnectedServices(
         Object.entries(status)
           .filter(([, v]) => v.connected)
@@ -53,7 +63,7 @@ export default function SubagentsPanel() {
         </button>
       </div>
 
-      {error && <div className="bg-red-900/50 border border-red-700 rounded-lg p-2 text-red-300 text-xs">{error}</div>}
+      {error && <div className="bg-status-error border rounded-lg p-2 text-red-300 text-xs">{error}</div>}
 
       {showCreate && (
         <CreateSubagentForm
@@ -82,6 +92,7 @@ export default function SubagentsPanel() {
               key={s.id}
               subagent={s}
               connectedServices={connectedServices}
+              assignedUser={users.find((u) => u.subagentId === s.id) ?? null}
               onToggle={async () => {
                 try { await api.updateSubagent(s.id, { enabled: !s.enabled }); fetchSubagents(); }
                 catch (err: any) { setError(err.message); }
@@ -117,17 +128,26 @@ export default function SubagentsPanel() {
   );
 }
 
-function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, connectedServices }: {
+function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, connectedServices, assignedUser }: {
   subagent: SubagentSummary;
   onToggle: () => void;
   onSpawn: () => void;
   onDelete: () => void;
   onRefresh: () => void;
   connectedServices: string[];
+  assignedUser: SubagentUserInfo | null;
 }) {
   const [authStatus, setAuthStatus] = useState<{ mode: string; authenticated: boolean } | null>(null);
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [showServices, setShowServices] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState(s.name);
+  const [showUserForm, setShowUserForm] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newKeyHolder, setNewKeyHolder] = useState(false);
+  const [userBusy, setUserBusy] = useState(false);
+  const [userError, setUserError] = useState("");
 
   useEffect(() => {
     if (s.claudeAuth.mode === "oauth") {
@@ -161,19 +181,51 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, con
   }
 
   return (
-    <div className="bg-surface-card rounded-xl p-4 space-y-3">
-      <div className="flex items-start justify-between gap-3">
+    <div className="glass-card p-3 sm:p-4 space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <a href={`/subagent/${s.id}`} className="font-medium hover:text-accent-400 transition">{s.name}</a>
+            {editingName ? (
+              <form
+                className="flex items-center gap-1"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const trimmed = nameValue.trim();
+                  if (!trimmed || trimmed === s.name) { setEditingName(false); setNameValue(s.name); return; }
+                  try {
+                    await api.updateSubagent(s.id, { name: trimmed });
+                    setEditingName(false);
+                    onRefresh();
+                  } catch { setNameValue(s.name); setEditingName(false); }
+                }}
+              >
+                <input
+                  value={nameValue}
+                  onChange={(e) => setNameValue(e.target.value)}
+                  onBlur={() => { setEditingName(false); setNameValue(s.name); }}
+                  onKeyDown={(e) => { if (e.key === "Escape") { setEditingName(false); setNameValue(s.name); } }}
+                  autoFocus
+                  className="w-40 px-2 py-0.5 text-sm font-medium bg-surface-input border border-accent-500 rounded text-theme-primary focus:outline-none"
+                />
+              </form>
+            ) : (
+              <a
+                href={`/subagent/${s.id}`}
+                className="font-medium hover:text-accent-400 transition"
+                onDoubleClick={(e) => { e.preventDefault(); setEditingName(true); }}
+                title="Double-click to rename"
+              >
+                {s.name}
+              </a>
+            )}
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.enabled ? "bg-green-500" : "bg-gray-500"}`} />
             {s.session && (
-              <span className="px-1.5 py-0.5 text-[10px] bg-blue-900/50 text-blue-400 rounded">running</span>
+              <span className="px-1.5 py-0.5 text-[10px] bg-blue-500/15 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 rounded font-medium">running</span>
             )}
           </div>
           {s.description && <p className="text-xs text-theme-secondary mt-0.5 truncate">{s.description}</p>}
         </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
           {s.session ? (
             <button onClick={async () => {
               try { await api.stopSubagent(s.id); onRefresh(); } catch {}
@@ -220,6 +272,14 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, con
             className="rounded w-3 h-3" />
           <span className="text-[10px]">auto</span>
         </label>
+        <label className="flex items-center gap-1 cursor-pointer" title="Common knowledge: read-only (no write/commit)">
+          <input type="checkbox" checked={!!s.commonReadOnly}
+            onChange={async () => {
+              try { await api.updateSubagent(s.id, { commonReadOnly: !s.commonReadOnly }); onRefresh(); } catch {}
+            }}
+            className="rounded w-3 h-3" />
+          <span className="text-[10px]">common RO</span>
+        </label>
       </div>
 
       {/* Inline service editor */}
@@ -255,6 +315,88 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, con
           ))}
         </div>
       )}
+
+      {/* User access */}
+      <div className="border-t border-theme/50 pt-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-theme-muted uppercase tracking-wider">Dashboard Login</span>
+          {assignedUser ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-theme-secondary">
+                <span className="text-accent-400">{assignedUser.username}</span>
+              </span>
+              {assignedUser.keyHolder && (
+                <span className="px-1.5 py-0.5 text-[10px] bg-yellow-900/50 text-yellow-400 rounded">key holder</span>
+              )}
+              <button
+                onClick={async () => {
+                  if (!confirm(`Remove login access for "${assignedUser.username}"?`)) return;
+                  try {
+                    await api.deleteUser(assignedUser.username);
+                    onRefresh();
+                  } catch (err: any) { setUserError(err.message); }
+                }}
+                className="text-[10px] text-theme-secondary hover:text-red-400 transition"
+              >
+                Remove
+              </button>
+            </div>
+          ) : showUserForm ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                placeholder="Username"
+                className="w-24 px-2 py-1 text-xs bg-surface-input border border-theme-input rounded text-theme-primary focus:outline-none"
+              />
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Password"
+                className="w-24 px-2 py-1 text-xs bg-surface-input border border-theme-input rounded text-theme-primary focus:outline-none"
+              />
+              <label className="flex items-center gap-1 text-[10px] text-theme-secondary cursor-pointer" title="Key holders can unlock services for all agents on login">
+                <input type="checkbox" checked={newKeyHolder} onChange={(e) => setNewKeyHolder(e.target.checked)} className="rounded w-3 h-3" />
+                Key Holder
+              </label>
+              <button
+                disabled={userBusy || !newUsername || !newPassword}
+                onClick={async () => {
+                  setUserBusy(true);
+                  setUserError("");
+                  try {
+                    await api.createUser(newUsername, newPassword, s.id, newKeyHolder);
+                    setShowUserForm(false);
+                    setNewUsername("");
+                    setNewPassword("");
+                    setNewKeyHolder(false);
+                    onRefresh();
+                  } catch (err: any) { setUserError(err.message); }
+                  finally { setUserBusy(false); }
+                }}
+                className="px-2 py-1 text-[10px] bg-accent-600 hover:bg-accent-700 text-white rounded transition disabled:opacity-50"
+              >
+                {userBusy ? "..." : "Save"}
+              </button>
+              <button
+                onClick={() => { setShowUserForm(false); setUserError(""); }}
+                className="text-[10px] text-theme-secondary hover:text-theme-primary transition"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowUserForm(true)}
+              className="text-[10px] text-accent-400 hover:text-accent-300 transition"
+            >
+              + Assign Login
+            </button>
+          )}
+        </div>
+        {userError && <p className="text-[10px] text-red-400 mt-1">{userError}</p>}
+      </div>
     </div>
   );
 }
@@ -291,7 +433,7 @@ function CreateSubagentForm({ connectedServices, onCreate, onCancel, onError }: 
   }
 
   return (
-    <form onSubmit={handleSubmit} className="bg-surface-card rounded-xl p-4 space-y-3">
+    <form onSubmit={handleSubmit} className="glass-card p-4 space-y-3">
       <h3 className="text-sm font-medium">Create Subagent</h3>
       <div className="grid grid-cols-2 gap-3">
         <div>

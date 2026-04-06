@@ -2,60 +2,225 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ================================================================
+   WORKBOT DESIGN SYSTEM — Glassmorphism + Dark/Light Mode
+   Uses CSS custom properties with Tailwind class-based dark mode.
+   Light mode is :root default, .dark class activates dark mode.
+   ================================================================ */
+
+/* === LIGHT MODE (default) === */
 :root {
-  /* Accent (buttons, links, focus) */
+  color-scheme: light;
+
+  /* Accent (buttons, links, focus) — overridden by accent color picker */
   --accent-400: 96 165 250;
   --accent-500: 59 130 246;
   --accent-600: 37 99 235;
   --accent-700: 29 78 216;
   --accent-900: 30 58 138;
 
-  /* Surfaces (backgrounds) */
+  /* Surfaces */
+  --surface-page: 246 248 252;
+  --surface-card: 255 255 255;
+  --surface-input: 241 243 247;
+  --surface-hover: 230 233 239;
+
+  /* Borders */
+  --border-default: 218 222 230;
+  --border-input: 203 209 219;
+
+  /* Text */
+  --text-primary: 15 23 42;
+  --text-secondary: 71 85 105;
+  --text-muted: 148 163 184;
+
+  /* Glassmorphism */
+  --glass-bg: 255 255 255 / 0.65;
+  --glass-border: 255 255 255 / 0.3;
+  --glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.06);
+  --glass-blur: 16px;
+
+  /* Semantic: Tags */
+  --tag-decision: 59 130 246;
+  --tag-pattern: 34 197 94;
+  --tag-correction: 239 68 68;
+  --tag-entity: 168 85 247;
+  --tag-project: 249 115 22;
+  --tag-context: 234 179 8;
+
+  /* Semantic: Status */
+  --status-success: 34 197 94;
+  --status-warning: 245 158 11;
+  --status-error: 239 68 68;
+  --status-info: 59 130 246;
+}
+
+/* === DARK MODE === */
+.dark {
+  color-scheme: dark;
+
   --surface-page: 3 7 18;
   --surface-card: 17 24 39;
   --surface-input: 31 41 55;
   --surface-hover: 55 65 81;
 
-  /* Borders */
   --border-default: 31 41 55;
   --border-input: 55 65 81;
 
-  /* Text */
   --text-primary: 243 244 246;
   --text-secondary: 156 163 175;
   --text-muted: 107 114 128;
+
+  --glass-bg: 17 24 39 / 0.6;
+  --glass-border: 255 255 255 / 0.08;
+  --glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+  --glass-blur: 16px;
+
+  /* Tags stay vibrant in dark mode */
+  --tag-decision: 96 165 250;
+  --tag-pattern: 74 222 128;
+  --tag-correction: 248 113 113;
+  --tag-entity: 192 132 252;
+  --tag-project: 251 146 60;
+  --tag-context: 250 204 21;
+
+  --status-success: 74 222 128;
+  --status-warning: 251 191 36;
+  --status-error: 248 113 113;
+  --status-info: 96 165 250;
 }
 
-/* === Accent utilities === */
+/* === ACCENT UTILITIES === */
 .bg-accent-600 { background-color: rgb(var(--accent-600)); }
 .bg-accent-700 { background-color: rgb(var(--accent-700)); }
 .bg-accent-900\/30 { background-color: rgb(var(--accent-900) / 0.3); }
 .text-accent-400 { color: rgb(var(--accent-400)); }
+.text-accent-300 { color: rgb(var(--accent-400)); }
 .ring-accent-500 { --tw-ring-color: rgb(var(--accent-500)); }
+.border-accent-500 { border-color: rgb(var(--accent-500)); }
 .border-accent-500\/30 { border-color: rgb(var(--accent-500) / 0.3); }
+.border-accent-500\/40 { border-color: rgb(var(--accent-500) / 0.4); }
 .focus\:ring-accent-500:focus { --tw-ring-color: rgb(var(--accent-500)); }
+.focus\:ring-accent-500\/50:focus { --tw-ring-color: rgb(var(--accent-500) / 0.5); }
+.focus\:border-accent-500:focus { border-color: rgb(var(--accent-500)); }
 .hover\:bg-accent-700:hover { background-color: rgb(var(--accent-700)); }
+.hover\:text-accent-300:hover { color: rgb(var(--accent-400)); }
+.active\:bg-accent-800:active { background-color: rgb(var(--accent-700)); }
+.bg-accent-600\/15 { background-color: rgb(var(--accent-600) / 0.15); }
+.bg-accent-600\/20 { background-color: rgb(var(--accent-600) / 0.2); }
+.bg-accent-600\/30 { background-color: rgb(var(--accent-600) / 0.3); }
 
-/* === Surface utilities === */
+/* === SURFACE UTILITIES === */
 .bg-surface-page { background-color: rgb(var(--surface-page)); }
 .bg-surface-card { background-color: rgb(var(--surface-card)); }
 .bg-surface-card\/50 { background-color: rgb(var(--surface-card) / 0.5); }
 .bg-surface-input { background-color: rgb(var(--surface-input)); }
+.bg-surface-input\/50 { background-color: rgb(var(--surface-input) / 0.5); }
 .bg-surface-hover { background-color: rgb(var(--surface-hover)); }
 .bg-surface-hover\/50 { background-color: rgb(var(--surface-hover) / 0.5); }
 .hover\:bg-surface-hover:hover { background-color: rgb(var(--surface-hover)); }
 .hover\:bg-surface-input:hover { background-color: rgb(var(--surface-input)); }
 .hover\:bg-surface-input\/50:hover { background-color: rgb(var(--surface-input) / 0.5); }
 
-/* === Border utilities === */
+/* === BORDER UTILITIES === */
 .border-theme { border-color: rgb(var(--border-default)); }
+.border-theme\/30 { border-color: rgb(var(--border-default) / 0.3); }
 .border-theme-input { border-color: rgb(var(--border-input)); }
 
-/* === Text utilities === */
+/* === TEXT UTILITIES === */
 .text-theme-primary { color: rgb(var(--text-primary)); }
 .text-theme-secondary { color: rgb(var(--text-secondary)); }
 .text-theme-muted { color: rgb(var(--text-muted)); }
 .hover\:text-theme-primary:hover { color: rgb(var(--text-primary)); }
 
-/* === Ring offset for color picker === */
+/* === GLASSMORPHISM UTILITIES === */
+.glass-card {
+  background: rgba(var(--glass-bg));
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid rgba(var(--glass-border));
+  box-shadow: var(--glass-shadow);
+  border-radius: 1rem;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.glass-card:hover {
+  box-shadow: var(--glass-shadow), 0 0 0 1px rgba(var(--accent-500) / 0.1);
+}
+
+.glass-input {
+  background: rgb(var(--surface-input));
+  border: 1px solid rgb(var(--border-input));
+  border-radius: 0.5rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.glass-input:focus {
+  border-color: rgb(var(--accent-500));
+  box-shadow: 0 0 0 2px rgb(var(--accent-500) / 0.2);
+  outline: none;
+}
+
+.glass-nav {
+  background: rgba(var(--glass-bg));
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* === SEMANTIC TAG COLORS === */
+.tag-decision { background: rgb(var(--tag-decision) / 0.15); color: rgb(var(--tag-decision)); }
+.tag-pattern { background: rgb(var(--tag-pattern) / 0.15); color: rgb(var(--tag-pattern)); }
+.tag-correction { background: rgb(var(--tag-correction) / 0.15); color: rgb(var(--tag-correction)); }
+.tag-entity { background: rgb(var(--tag-entity) / 0.15); color: rgb(var(--tag-entity)); }
+.tag-project { background: rgb(var(--tag-project) / 0.15); color: rgb(var(--tag-project)); }
+.tag-context { background: rgb(var(--tag-context) / 0.15); color: rgb(var(--tag-context)); }
+.tag-status { background: rgb(var(--status-info) / 0.15); color: rgb(var(--status-info)); }
+.tag-domain { background: rgb(var(--tag-entity) / 0.1); color: rgb(var(--tag-entity)); }
+.tag-default { background: rgb(var(--surface-input)); color: rgb(var(--text-secondary)); }
+
+/* === STATUS COLORS === */
+.status-success { color: rgb(var(--status-success)); }
+.status-warning { color: rgb(var(--status-warning)); }
+.status-error { color: rgb(var(--status-error)); }
+.bg-status-error { background: rgb(var(--status-error) / 0.12); border-color: rgb(var(--status-error) / 0.3); }
+.bg-status-warning { background: rgb(var(--status-warning) / 0.12); border-color: rgb(var(--status-warning) / 0.3); }
+
+/* === RING OFFSET === */
 .ring-offset-surface-card { --tw-ring-offset-color: rgb(var(--surface-card)); }
+
+/* === SCROLLBAR HIDE === */
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* === PROSE (BRAIN NOTES) === */
+.prose-brain h1, .brain-prose h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem; color: rgb(var(--text-primary)); }
+.prose-brain h2, .brain-prose h2 { font-size: 1.25rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; color: rgb(var(--text-primary)); }
+.prose-brain h3, .brain-prose h3 { font-size: 1.1rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; color: rgb(var(--text-primary)); }
+.prose-brain p, .brain-prose p { margin-bottom: 0.5rem; line-height: 1.7; color: rgb(var(--text-secondary)); }
+.prose-brain ul, .brain-prose ul, .prose-brain ol, .brain-prose ol { margin: 0.5rem 0; padding-left: 1.5rem; color: rgb(var(--text-secondary)); }
+.prose-brain li, .brain-prose li { margin-bottom: 0.25rem; }
+.prose-brain code, .brain-prose code { background: rgb(var(--surface-input)); padding: 0.15rem 0.4rem; border-radius: 0.3rem; font-size: 0.85em; color: rgb(var(--accent-400)); }
+.prose-brain pre, .brain-prose pre { background: rgb(var(--surface-input)); padding: 0.75rem 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.75rem 0; }
+.prose-brain pre code, .brain-prose pre code { background: transparent; padding: 0; color: rgb(var(--text-primary)); }
+.prose-brain a, .brain-prose a { color: rgb(var(--accent-400)); text-decoration: underline; text-underline-offset: 2px; }
+.prose-brain a:hover, .brain-prose a:hover { opacity: 0.8; }
+.prose-brain blockquote, .brain-prose blockquote { border-left: 3px solid rgb(var(--accent-500) / 0.4); padding-left: 0.75rem; color: rgb(var(--text-muted)); margin: 0.75rem 0; font-style: italic; }
+.prose-brain table, .brain-prose table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.85em; }
+.prose-brain th, .brain-prose th, .prose-brain td, .brain-prose td { border: 1px solid rgb(var(--border-default)); padding: 0.4rem 0.6rem; text-align: left; }
+.prose-brain th, .brain-prose th { background: rgb(var(--surface-input)); font-weight: 600; color: rgb(var(--text-primary)); }
+.prose-brain strong, .brain-prose strong { color: rgb(var(--text-primary)); font-weight: 600; }
+
+/* === TRANSITIONS === */
+* { transition-property: color, background-color, border-color, box-shadow, opacity;
+    transition-timing-function: ease; transition-duration: 150ms; }
+*:focus { transition-duration: 0ms; }
+
+/* === MOBILE === */
+@media (max-width: 640px) {
+  button, a[role="button"], [type="checkbox"] { min-height: 36px; }
+  input, select, textarea { font-size: 16px !important; }
+}
+
+/* === PAGE BACKGROUND === */
+body {
+  background-color: rgb(var(--surface-page));
+  color: rgb(var(--text-primary));
+}

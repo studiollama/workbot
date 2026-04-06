@@ -7,6 +7,12 @@ import {
 } from "./crypto.js";
 import { PROJECT_ROOT, STORE_DIR, STORE_PATH } from "./paths.js";
 import type { StoredService } from "./paths.js";
+import { postgresqlService } from "./connections/postgresql.js";
+import { oracleService } from "./connections/oracle.js";
+import { sshService } from "./connections/ssh.js";
+import { sftpService } from "./connections/sftp.js";
+import { ftpService } from "./connections/ftp.js";
+import { telnetService } from "./connections/telnet.js";
 
 export { PROJECT_ROOT, STORE_DIR, STORE_PATH };
 export type { StoredService };
@@ -130,8 +136,15 @@ export interface OAuthConfig {
   redirectPath: string;
 }
 
-export interface ServiceConfig {
+// ── Discriminated union: REST vs Connection services ──────────────────
+
+interface ServiceConfigBase {
   name: string;
+  difficulty?: string;
+}
+
+export interface RestServiceConfig extends ServiceConfigBase {
+  kind: "rest";
   validateUrl: string | ((extras: Record<string, string>) => string);
   authHeader: (
     token: string,
@@ -143,13 +156,35 @@ export interface ServiceConfig {
   extraFields?: { key: string; label: string; placeholder: string }[];
   tokenLabel?: string;
   authNote?: string;
-  difficulty?: string;
   preConnect?: (
     token: string,
     extras: Record<string, string>
   ) => Promise<{ resolvedToken: string }>;
   oauth?: OAuthConfig;
 }
+
+export interface ConnectionField {
+  key: string;
+  label: string;
+  placeholder: string;
+  type: "text" | "password" | "textarea" | "number";
+  required?: boolean;
+  defaultValue?: string;
+}
+
+export interface ConnectionServiceConfig extends ServiceConfigBase {
+  kind: "connection";
+  protocol: "database" | "ssh" | "sftp" | "ftp" | "telnet";
+  connectionFields: ConnectionField[];
+  validate: (params: Record<string, string>) => Promise<{ user: string }>;
+  execute: (params: Record<string, string>, command: string) => Promise<string>;
+  defaultPort: number;
+  docsUrl: string;
+  tokenLabel?: string;
+  authNote?: string;
+}
+
+export type ServiceConfig = RestServiceConfig | ConnectionServiceConfig;
 
 // Azure AD client credentials → bearer token exchange
 export async function getAzureADToken(
@@ -182,6 +217,7 @@ export async function getAzureADToken(
 
 export const SERVICES: Record<string, ServiceConfig> = {
   github: {
+    kind: "rest",
     name: "GitHub",
     validateUrl: "https://api.github.com/user",
     authHeader: (token) => ({
@@ -194,6 +230,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key",
   },
   airtable: {
+    kind: "rest",
     name: "Airtable",
     validateUrl: "https://api.airtable.com/v0/meta/whoami",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
@@ -203,6 +240,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key",
   },
   asana: {
+    kind: "rest",
     name: "Asana",
     validateUrl: "https://app.asana.com/api/1.0/users/me",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
@@ -212,6 +250,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key",
   },
   zendesk: {
+    kind: "rest",
     name: "Zendesk",
     validateUrl: (extras) =>
       `https://${extras.subdomain}.zendesk.com/api/v2/users/me.json`,
@@ -238,63 +277,8 @@ export const SERVICES: Record<string, ServiceConfig> = {
     ],
     difficulty: "API Key + Config",
   },
-  squarespace: {
-    name: "Squarespace",
-    validateUrl: "https://api.squarespace.com/1.0/authorization/website",
-    authHeader: (token) => ({
-      Authorization: `Bearer ${token}`,
-      "User-Agent": "workbot",
-    }),
-    extractUser: (data) => data.website?.siteTitle ?? data.id ?? "Connected",
-    tokenUrl: "https://developers.squarespace.com/",
-    tokenPrefix: "",
-    difficulty: "OAuth Token",
-  },
-  freshdesk: {
-    name: "Freshdesk",
-    validateUrl: (extras) =>
-      `https://${extras.subdomain}.freshdesk.com/api/v2/agents/me`,
-    authHeader: (token) => ({
-      Authorization:
-        "Basic " + Buffer.from(`${token}:X`).toString("base64"),
-    }),
-    extractUser: (data) =>
-      data.contact?.name ?? data.contact?.email ?? "Connected",
-    tokenUrl:
-      "https://support.freshdesk.com/en/support/solutions/articles/215517",
-    tokenPrefix: "",
-    extraFields: [
-      {
-        key: "subdomain",
-        label: "Freshdesk Subdomain",
-        placeholder: "yourcompany",
-      },
-    ],
-    difficulty: "API Key + Config",
-  },
-  quickbooks: {
-    name: "QuickBooks",
-    validateUrl: (extras) =>
-      `https://quickbooks.api.intuit.com/v3/company/${extras.realmId}/companyinfo/${extras.realmId}`,
-    authHeader: (token) => ({
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-    }),
-    extractUser: (data) => data.CompanyInfo?.CompanyName ?? "Connected",
-    tokenUrl: "https://developer.intuit.com/app/developer/playground",
-    tokenPrefix: "",
-    authNote:
-      "OAuth token — expires after ~1 hour. Re-connect when expired.",
-    difficulty: "OAuth Token",
-    extraFields: [
-      {
-        key: "realmId",
-        label: "Company ID (Realm ID)",
-        placeholder: "123456789",
-      },
-    ],
-  },
   googleads: {
+    kind: "rest",
     name: "Google Ads",
     validateUrl:
       "https://googleads.googleapis.com/v20/customers:listAccessibleCustomers",
@@ -360,6 +344,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     },
   },
   entra: {
+    kind: "rest",
     name: "Entra (Azure AD)",
     validateUrl: "https://graph.microsoft.com/v1.0/organization",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
@@ -393,6 +378,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     },
   },
   intune: {
+    kind: "rest",
     name: "Intune",
     validateUrl:
       "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?$top=1",
@@ -427,6 +413,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     },
   },
   security: {
+    kind: "rest",
     name: "Security Center / XDR",
     validateUrl:
       "https://graph.microsoft.com/v1.0/security/alerts_v2?$top=1",
@@ -460,21 +447,8 @@ export const SERVICES: Record<string, ServiceConfig> = {
       return { resolvedToken };
     },
   },
-  canva: {
-    name: "Canva",
-    validateUrl: "https://api.canva.com/rest/v1/users/me",
-    authHeader: (token) => ({
-      Authorization: `Bearer ${token}`,
-    }),
-    extractUser: (data) =>
-      data.display_name ?? data.email ?? "Connected",
-    tokenUrl: "https://www.canva.dev/docs/connect/authentication/",
-    tokenPrefix: "",
-    authNote:
-      "OAuth token — expires after ~4 hours. Re-connect when expired.",
-    difficulty: "OAuth Token",
-  },
   nanobanana: {
+    kind: "rest",
     name: "Nano Banana (Gemini)",
     validateUrl:
       "https://generativelanguage.googleapis.com/v1beta/models",
@@ -492,6 +466,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key",
   },
   jules: {
+    kind: "rest",
     name: "Jules",
     validateUrl: "https://jules.googleapis.com/v1alpha/sessions",
     authHeader: (token) => ({
@@ -508,6 +483,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key",
   },
   sharepoint: {
+    kind: "rest",
     name: "SharePoint",
     validateUrl: (extras) =>
       `https://${extras.site_host}/_api/web`,
@@ -548,6 +524,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     },
   },
   outlook: {
+    kind: "rest",
     name: "Outlook (Microsoft 365)",
     validateUrl:
       "https://graph.microsoft.com/v1.0/users?$top=1&$select=displayName,mail",
@@ -581,92 +558,8 @@ export const SERVICES: Record<string, ServiceConfig> = {
       return { resolvedToken };
     },
   },
-  gmail: {
-    name: "Gmail",
-    validateUrl:
-      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
-    extractUser: (data) => data.emailAddress ?? "Connected",
-    tokenUrl: "https://developers.google.com/oauthplayground/",
-    tokenPrefix: "",
-    tokenLabel: "Refresh Token",
-    authNote:
-      "Enter your OAuth credentials and click 'Sign in with Google', or paste a refresh token manually.",
-    difficulty: "OAuth + Credentials",
-    extraFields: [
-      {
-        key: "client_id",
-        label: "OAuth Client ID",
-        placeholder: "xxxxx.apps.googleusercontent.com",
-      },
-      {
-        key: "client_secret",
-        label: "OAuth Client Secret",
-        placeholder: "GOCSPX-xxxxx",
-      },
-    ],
-    oauth: {
-      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      tokenUrl: "https://oauth2.googleapis.com/token",
-      scopes: [
-        "https://www.googleapis.com/auth/gmail.send",
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.compose",
-        "https://www.googleapis.com/auth/gmail.modify",
-        "https://www.googleapis.com/auth/gmail.settings.basic",
-        "https://www.googleapis.com/auth/gmail.labels",
-      ],
-      redirectPath: "/api/services/gmail/oauth/callback",
-    },
-    preConnect: async (refreshToken, extras) => {
-      const res = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          client_id: extras.client_id,
-          client_secret: extras.client_secret,
-          refresh_token: refreshToken,
-        }).toString(),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(
-          `Gmail token refresh failed (${res.status}): ${text.slice(0, 200)}`
-        );
-      }
-      const data = await res.json();
-      return { resolvedToken: data.access_token };
-    },
-  },
-  googleadmin: {
-    name: "Google Admin Console",
-    validateUrl:
-      "https://admin.googleapis.com/admin/directory/v1/users?maxResults=1&customer=my_customer",
-    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
-    extractUser: (data) => {
-      const users = data.users ?? [];
-      return users.length > 0
-        ? `${users[0].name?.fullName ?? users[0].primaryEmail ?? "Admin"}`
-        : "Connected";
-    },
-    tokenUrl: "https://developers.google.com/oauthplayground/",
-    tokenPrefix: "",
-    authNote:
-      "OAuth token — expires after ~1 hour. Re-connect when expired.",
-    difficulty: "Admin + OAuth",
-  },
-  ticktick: {
-    name: "TickTick",
-    validateUrl: "https://api.ticktick.com/open/v1/user",
-    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
-    extractUser: (data) => data.username ?? data.name ?? "Connected",
-    tokenUrl: "https://developer.ticktick.com/",
-    tokenPrefix: "",
-    authNote: "OAuth token — may expire. Re-connect when expired.",
-    difficulty: "OAuth Token",
-  },
   readai: {
+    kind: "rest",
     name: "Read.ai",
     validateUrl: "https://api.read.ai/v1/meetings",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
@@ -684,6 +577,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "OAuth Token",
   },
   dagster: {
+    kind: "rest",
     name: "Dagster Cloud",
     validateUrl: (extras) =>
       `https://${extras.org_name}.dagster.cloud/prod/report_asset_materialization/`,
@@ -705,6 +599,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key + Config",
   },
   render: {
+    kind: "rest",
     name: "Render",
     validateUrl: "https://api.render.com/v1/owners",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
@@ -719,6 +614,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key",
   },
   stripe: {
+    kind: "rest",
     name: "Stripe",
     validateUrl: "https://api.stripe.com/v1/balance",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
@@ -736,6 +632,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key",
   },
   supabase: {
+    kind: "rest",
     name: "Supabase",
     validateUrl: "https://api.supabase.com/v1/projects",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
@@ -748,5 +645,100 @@ export const SERVICES: Record<string, ServiceConfig> = {
     tokenUrl: "https://supabase.com/dashboard/account/tokens",
     tokenPrefix: "sbp_",
     difficulty: "API Key",
+  },
+
+  // ── New REST services ───────────────────────────────────────────────
+
+  hex: {
+    kind: "rest",
+    name: "Hex",
+    validateUrl: "https://app.hex.tech/api/v1/user/me",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => data.email ?? data.name ?? "Connected",
+    tokenUrl: "https://app.hex.tech/settings/tokens",
+    tokenPrefix: "",
+    difficulty: "API Key",
+  },
+  crowdstrike: {
+    kind: "rest",
+    name: "CrowdStrike",
+    validateUrl: "https://api.crowdstrike.com/sensors/queries/installers/ccid/v1",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: () => "Connected",
+    tokenUrl: "https://falcon.crowdstrike.com/api-clients-and-keys",
+    tokenPrefix: "",
+    tokenLabel: "Client Secret",
+    authNote: "Uses OAuth2 client credentials flow. Token is exchanged automatically.",
+    difficulty: "OAuth Client Credentials",
+    extraFields: [
+      { key: "base_url", label: "API Base URL", placeholder: "api.crowdstrike.com" },
+      { key: "client_id", label: "Client ID", placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" },
+    ],
+    preConnect: async (clientSecret, extras) => {
+      const baseUrl = extras.base_url || "api.crowdstrike.com";
+      const res = await fetch(`https://${baseUrl}/oauth2/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: extras.client_id,
+          client_secret: clientSecret,
+        }).toString(),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`CrowdStrike token exchange failed (${res.status}): ${text.slice(0, 200)}`);
+      }
+      const data = await res.json();
+      return { resolvedToken: data.access_token };
+    },
+  },
+  filescom: {
+    kind: "rest",
+    name: "Files.com",
+    validateUrl: "https://app.files.com/api/rest/v1/api_keys?per_page=1",
+    authHeader: (token) => ({ "X-FilesAPI-Key": token }),
+    extractUser: () => "Connected",
+    tokenUrl: "https://www.files.com/docs/sdk-and-tools/api-keys",
+    tokenPrefix: "",
+    difficulty: "API Key",
+  },
+
+  // ── Connection services ─────────────────────────────────────────────
+
+  postgresql: {
+    kind: "connection",
+    name: "PostgreSQL",
+    difficulty: "Connection",
+    ...postgresqlService,
+  },
+  oracle: {
+    kind: "connection",
+    name: "Oracle 11g",
+    difficulty: "Connection + InstantClient",
+    ...oracleService,
+  },
+  ssh: {
+    kind: "connection",
+    name: "SSH",
+    difficulty: "Connection",
+    ...sshService,
+  },
+  sftp: {
+    kind: "connection",
+    name: "SFTP",
+    difficulty: "Connection",
+    ...sftpService,
+  },
+  ftp: {
+    kind: "connection",
+    name: "FTP",
+    difficulty: "Connection",
+    ...ftpService,
+  },
+  telnet: {
+    kind: "connection",
+    name: "Telnet",
+    difficulty: "Connection",
+    ...telnetService,
   },
 };

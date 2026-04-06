@@ -1,690 +1,327 @@
-import { useState, useEffect, useRef } from "react";
-import {
-  api,
-  type DevStatus,
-  type GitCommit,
-  type GitIssue,
-  type GitPR,
-  type EnvFile,
-} from "../api/client";
-import { useServices } from "../context/ServicesContext";
+import { useState, useEffect, useCallback } from "react";
+import { api, type DevProject, type DevStatus, type GitCommit, type GitIssue, type GitPR } from "../api/client";
 
 export default function DevPanel() {
-  const { refresh: refreshServices } = useServices();
   const [status, setStatus] = useState<DevStatus | null>(null);
-  const [commits, setCommits] = useState<GitCommit[]>([]);
-  const [issues, setIssues] = useState<GitIssue[]>([]);
-  const [pulls, setPulls] = useState<GitPR[]>([]);
-  const [envFiles, setEnvFiles] = useState<EnvFile[]>([]);
-  const [repoInput, setRepoInput] = useState("");
-  const [ghToken, setGhToken] = useState("");
-  const [connectingGh, setConnectingGh] = useState(false);
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const [showAdd, setShowAdd] = useState(false);
+  const [repoUrl, setRepoUrl] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
-  async function fetchStatus() {
+  const refresh = useCallback(async () => {
     try {
       const s = await api.getDevStatus();
       setStatus(s);
-      return s;
-    } catch {
-      setLoading(false);
-      return null;
-    }
-  }
-
-  async function fetchRepoData() {
-    try {
-      const [c, i, p, e] = await Promise.all([
-        api.getDevCommits().catch(() => []),
-        api.getDevIssues().catch(() => []),
-        api.getDevPulls().catch(() => []),
-        api.getDevEnvFiles().catch(() => []),
-      ]);
-      setCommits(c);
-      setIssues(i);
-      setPulls(p);
-      setEnvFiles(e);
-    } catch {
-      // partial data is fine
-    }
-  }
-
-  async function refreshAll() {
-    const s = await fetchStatus();
-    if (s?.cloneStatus === "cloned") await fetchRepoData();
-    return s;
-  }
-
-  useEffect(() => {
-    (async () => {
-      await refreshAll();
-      setLoading(false);
-    })();
-    return () => clearInterval(pollRef.current);
+    } catch {} finally { setLoading(false); }
   }, []);
 
-  // Poll while cloning
-  useEffect(() => {
-    if (status?.cloneStatus === "cloning") {
-      pollRef.current = setInterval(async () => {
-        const s = await fetchStatus();
-        if (s?.cloneStatus === "cloned") {
-          clearInterval(pollRef.current);
-          await fetchRepoData();
-        }
-      }, 3000);
-      return () => clearInterval(pollRef.current);
-    }
-  }, [status?.cloneStatus]);
+  useEffect(() => { refresh(); }, [refresh]);
 
-  async function handleSetRepo() {
-    if (!repoInput.trim()) return;
+  async function handleAdd() {
+    if (!repoUrl.trim()) return;
+    setAddBusy(true);
     setError("");
     try {
-      await api.setDevRepo(repoInput.trim());
-      await fetchStatus();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
-  async function handleClone() {
-    setError("");
-    try {
-      await api.startClone();
-      await fetchStatus();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
-  async function handleRemove() {
-    setError("");
-    try {
-      await api.removeDevRepo();
-      setCommits([]);
-      setIssues([]);
-      setPulls([]);
-      setEnvFiles([]);
-      await fetchStatus();
-    } catch (err: any) {
-      setError(err.message);
-    }
+      await api.addDevProject(repoUrl.trim(), projectName.trim() || undefined);
+      setRepoUrl("");
+      setProjectName("");
+      setShowAdd(false);
+      refresh();
+    } catch (err: any) { setError(err.message); }
+    finally { setAddBusy(false); }
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="w-5 h-5 border-2 border-gray-600 border-t-gray-200 rounded-full animate-spin" />
-      </div>
-    );
+    return <div className="flex items-center justify-center py-12"><div className="w-5 h-5 border-2 border-surface-hover border-t-accent-600 rounded-full animate-spin" /></div>;
   }
 
-  // State: GitHub not connected — prompt for token inline
   if (!status?.githubConnected) {
-    async function handleConnectGitHub(e?: React.FormEvent) {
-      e?.preventDefault();
-      if (!ghToken.trim()) return;
-      setError("");
-      setConnectingGh(true);
-      try {
-        await api.connectService("github", ghToken.trim());
-        setGhToken("");
-        await refreshServices();
-        await fetchStatus();
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setConnectingGh(false);
-      }
-    }
-
     return (
-      <div className="bg-surface-card rounded-xl p-6 space-y-4">
+      <div className="glass-card p-4 sm:p-6 space-y-3">
         <h3 className="font-medium">Connect GitHub</h3>
-        <p className="text-sm text-theme-secondary">
-          The Development tab needs a GitHub Personal Access Token to clone
-          repos, read issues, and pull requests.
-        </p>
-
-        <div className="bg-surface-input border border-theme-input rounded-lg p-4 space-y-2 text-xs text-theme-secondary">
-          <p className="font-medium text-theme-primary text-sm">Required token permissions:</p>
-          <ul className="list-disc list-inside space-y-1">
-            <li><span className="font-mono">repo</span> — full access to private repositories (clone, read, push)</li>
-            <li><span className="font-mono">read:org</span> — read org membership (for org repos)</li>
-            <li><span className="font-mono">read:project</span> — read project boards (optional)</li>
-          </ul>
-          <p className="pt-1">
-            Create a token at{" "}
-            <a
-              href="https://github.com/settings/tokens/new?scopes=repo,read:org"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent-400 hover:underline"
-            >
-              github.com/settings/tokens
-            </a>{" "}
-            — select <span className="font-mono">repo</span> and <span className="font-mono">read:org</span> scopes.
-          </p>
-        </div>
-
-        {error && (
-          <div className="bg-red-900/50 border border-red-700 rounded-lg p-2 text-red-300 text-xs">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleConnectGitHub} className="flex gap-2">
-          <input
-            type="password"
-            value={ghToken}
-            onChange={(e) => setGhToken(e.target.value)}
-            placeholder="ghp_..."
-            className="flex-1 bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 font-mono"
-          />
-          <button
-            type="submit"
-            disabled={!ghToken.trim() || connectingGh}
-            className="bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
-          >
-            {connectingGh ? "Connecting..." : "Connect"}
-          </button>
-        </form>
+        <p className="text-sm text-theme-secondary">Connect a GitHub service in the Services tab to use development projects.</p>
       </div>
     );
   }
 
-  // State: No repo configured
-  if (!status.repoUrl) {
+  const projects = status?.projects ?? [];
+  const [migrating, setMigrating] = useState(false);
+
+  async function handleMigrate() {
+    setMigrating(true);
+    setError("");
+    try {
+      const result = await api.migrateDevFolder();
+      if (result.ok) refresh();
+      else setError(result.message || "Migration failed");
+    } catch (err: any) { setError(err.message); }
+    finally { setMigrating(false); }
+  }
+
+  // Detail view for selected project
+  if (selectedProject) {
+    const project = projects.find((p) => p.id === selectedProject);
+    if (!project) { setSelectedProject(null); return null; }
     return (
-      <div className="bg-surface-card rounded-xl p-6 space-y-4">
-        <h3 className="font-medium">Set up a development project</h3>
-        <p className="text-sm text-theme-secondary">
-          Enter a GitHub repository URL to clone and work on.
-        </p>
-        {error && (
-          <div className="bg-red-900/50 border border-red-700 rounded-lg p-2 text-red-300 text-xs">
-            {error}
-          </div>
-        )}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSetRepo();
-          }}
-          className="flex gap-2"
-        >
-          <input
-            type="text"
-            value={repoInput}
-            onChange={(e) => setRepoInput(e.target.value)}
-            placeholder="https://github.com/owner/repo"
-            className="flex-1 bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 font-mono"
-          />
-          <button
-            type="submit"
-            disabled={!repoInput.trim()}
-            className="bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
-          >
-            Set Repository
-          </button>
-        </form>
-      </div>
+      <ProjectDetail
+        project={project}
+        onBack={() => setSelectedProject(null)}
+        onRefresh={refresh}
+      />
     );
   }
 
-  // State: Repo set but not cloned / cloning / error
-  if (status.cloneStatus !== "cloned") {
-    return (
-      <div className="bg-surface-card rounded-xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-medium">
-              {status.owner}/{status.repo}
-            </h3>
-            <p className="text-xs text-theme-secondary font-mono">
-              {status.repoUrl}
-            </p>
-          </div>
-          <button
-            onClick={handleRemove}
-            className="text-xs text-theme-secondary hover:text-red-400 transition"
-          >
-            Remove
-          </button>
-        </div>
-
-        {error && (
-          <div className="bg-red-900/50 border border-red-700 rounded-lg p-2 text-red-300 text-xs">
-            {error}
-          </div>
-        )}
-
-        {status.cloneStatus === "cloning" && (
-          <div className="flex items-center gap-3 text-sm text-theme-secondary">
-            <div className="w-4 h-4 border-2 border-gray-600 border-t-gray-200 rounded-full animate-spin" />
-            Cloning repository...
-          </div>
-        )}
-
-        {status.cloneStatus === "error" && (
-          <div className="space-y-2">
-            <div className="bg-red-900/50 border border-red-700 rounded-lg p-2 text-red-300 text-xs">
-              {status.cloneError}
-            </div>
-            <button
-              onClick={handleClone}
-              className="bg-accent-600 hover:bg-accent-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
-            >
-              Retry Clone
-            </button>
-          </div>
-        )}
-
-        {status.cloneStatus === "idle" && (
-          <button
-            onClick={handleClone}
-            className="bg-accent-600 hover:bg-accent-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
-          >
-            Clone Repository
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  // State: Active — repo cloned
   return (
     <div className="space-y-4">
-      {/* Header card */}
-      <div className="bg-surface-card rounded-xl p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-medium">
-              {status.owner}/{status.repo}
-            </h3>
-            {status.lastClonedAt && (
-              <p className="text-xs text-theme-secondary">
-                Last updated: {new Date(status.lastClonedAt).toLocaleString()}
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base sm:text-lg font-semibold">Development Projects</h2>
+          <p className="text-xs text-theme-muted">{projects.length} project{projects.length !== 1 ? "s" : ""}</p>
+        </div>
+        <button onClick={() => setShowAdd(!showAdd)}
+          className="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 text-white text-sm font-medium rounded-lg transition">
+          {showAdd ? "Cancel" : "+ Add Project"}
+        </button>
+      </div>
+
+      {error && <div className="bg-status-error border rounded-lg p-2 text-xs status-error">{error}</div>}
+
+      {/* Migration banner for old single-folder setup */}
+      {status?.needsMigration && projects.length === 0 && (
+        <div className="glass-card p-4 space-y-2 border-yellow-500/30">
+          <div className="flex items-start gap-3">
+            <span className="text-yellow-500 text-lg shrink-0">&#9888;</span>
+            <div className="flex-1">
+              <h3 className="text-sm font-medium">Legacy Development Folder Detected</h3>
+              <p className="text-xs text-theme-secondary mt-1">
+                Your <code className="text-theme-primary">development/</code> folder contains a single cloned repo from the old setup.
+                Convert it to the new multi-project format to continue using it.
               </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => refreshAll()}
-              className="p-1.5 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
-              title="Refresh"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M1 1v5h5" />
-                <path d="M3.51 10a6 6 0 1 0 .7-6.2L1 6" />
-              </svg>
-            </button>
-            <button
-              onClick={handleClone}
-              className="text-xs bg-surface-input hover:bg-surface-hover border border-theme-input rounded-lg px-3 py-1.5 transition"
-            >
-              Pull Latest
-            </button>
-            <button
-              onClick={handleRemove}
-              className="text-xs text-theme-secondary hover:text-red-400 transition"
-            >
-              Remove
+            </div>
+            <button onClick={handleMigrate} disabled={migrating}
+              className="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 text-white text-sm rounded-lg transition disabled:opacity-50 shrink-0">
+              {migrating ? "Migrating..." : "Convert"}
             </button>
           </div>
         </div>
-      </div>
-
-      {error && (
-        <div className="bg-red-900/50 border border-red-700 rounded-lg p-2 text-red-300 text-xs">
-          {error}
-        </div>
       )}
 
-      {/* Repo overview: commits, issues, PRs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <CommitsList commits={commits} owner={status.owner!} repo={status.repo!} />
-        <IssuesList issues={issues} owner={status.owner!} repo={status.repo!} />
-        <PullsList pulls={pulls} owner={status.owner!} repo={status.repo!} />
-      </div>
-
-      {/* Env manager */}
-      <EnvManager envFiles={envFiles} onRefresh={fetchRepoData} />
-
-    </div>
-  );
-}
-
-// --- Sub-components ---
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function CommitsList({
-  commits,
-  owner,
-  repo,
-}: {
-  commits: GitCommit[];
-  owner: string;
-  repo: string;
-}) {
-  return (
-    <div className="bg-surface-card rounded-xl p-4 space-y-2">
-      <h4 className="text-xs text-theme-secondary uppercase tracking-wider">
-        Recent Commits ({commits.length})
-      </h4>
-      {commits.length === 0 ? (
-        <p className="text-xs text-theme-muted">No commits found</p>
-      ) : (
-        <div className="space-y-1.5 max-h-64 overflow-y-auto">
-          {commits.map((c) => (
-            <a
-              key={c.sha}
-              href={`https://github.com/${owner}/${repo}/commit/${c.sha}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-xs hover:bg-surface-input rounded p-1.5 transition"
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-accent-400 shrink-0">
-                  {c.sha}
-                </span>
-                <span className="text-theme-secondary truncate">
-                  {c.author}
-                </span>
-                <span className="text-theme-muted ml-auto shrink-0">
-                  {timeAgo(c.date)}
-                </span>
-              </div>
-              <p className="text-theme-primary truncate mt-0.5">{c.message}</p>
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function IssuesList({
-  issues,
-  owner,
-  repo,
-}: {
-  issues: GitIssue[];
-  owner: string;
-  repo: string;
-}) {
-  return (
-    <div className="bg-surface-card rounded-xl p-4 space-y-2">
-      <h4 className="text-xs text-theme-secondary uppercase tracking-wider">
-        Open Issues ({issues.length})
-      </h4>
-      {issues.length === 0 ? (
-        <p className="text-xs text-theme-muted">No open issues</p>
-      ) : (
-        <div className="space-y-1.5 max-h-64 overflow-y-auto">
-          {issues.map((i) => (
-            <a
-              key={i.number}
-              href={`https://github.com/${owner}/${repo}/issues/${i.number}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-xs hover:bg-surface-input rounded p-1.5 transition"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-theme-muted">#{i.number}</span>
-                <span className="truncate text-theme-primary">{i.title}</span>
-              </div>
-              {i.labels.length > 0 && (
-                <div className="flex gap-1 mt-1 flex-wrap">
-                  {i.labels.slice(0, 3).map((l) => (
-                    <span
-                      key={l}
-                      className="px-1.5 py-0.5 bg-surface-input rounded text-[10px] text-theme-secondary"
-                    >
-                      {l}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PullsList({
-  pulls,
-  owner,
-  repo,
-}: {
-  pulls: GitPR[];
-  owner: string;
-  repo: string;
-}) {
-  return (
-    <div className="bg-surface-card rounded-xl p-4 space-y-2">
-      <h4 className="text-xs text-theme-secondary uppercase tracking-wider">
-        Open PRs ({pulls.length})
-      </h4>
-      {pulls.length === 0 ? (
-        <p className="text-xs text-theme-muted">No open pull requests</p>
-      ) : (
-        <div className="space-y-1.5 max-h-64 overflow-y-auto">
-          {pulls.map((p) => (
-            <a
-              key={p.number}
-              href={`https://github.com/${owner}/${repo}/pull/${p.number}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-xs hover:bg-surface-input rounded p-1.5 transition"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-theme-muted">#{p.number}</span>
-                <span className="truncate text-theme-primary">{p.title}</span>
-              </div>
-              <div className="flex items-center gap-1 mt-1 text-[10px] text-theme-muted">
-                <span className="font-mono">{p.head}</span>
-                <span>→</span>
-                <span className="font-mono">{p.base}</span>
-              </div>
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EnvManager({
-  envFiles,
-  onRefresh,
-}: {
-  envFiles: EnvFile[];
-  onRefresh: () => Promise<void>;
-}) {
-  const [activeFile, setActiveFile] = useState(0);
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
-  const [editing, setEditing] = useState<{
-    file: string;
-    entries: { key: string; value: string }[];
-  } | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  if (envFiles.length === 0) {
-    return (
-      <div className="bg-surface-card rounded-xl p-4">
-        <h4 className="text-xs text-theme-secondary uppercase tracking-wider">
-          Environment Files
-        </h4>
-        <p className="text-xs text-theme-muted mt-2">
-          No .env files found in the project
-        </p>
-      </div>
-    );
-  }
-
-  const current = envFiles[activeFile];
-
-  async function handleReveal(filename: string) {
-    if (revealed[filename]) {
-      setRevealed((r) => ({ ...r, [filename]: false }));
-      return;
-    }
-    try {
-      const files = await api.getDevEnvFiles(true);
-      const file = files.find((f) => f.filename === filename);
-      if (file) {
-        setEditing({ file: filename, entries: [...file.entries] });
-        setRevealed((r) => ({ ...r, [filename]: true }));
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  async function handleSave() {
-    if (!editing) return;
-    setSaving(true);
-    try {
-      await api.updateDevEnvFile(editing.file, editing.entries);
-      await onRefresh();
-      setEditing(null);
-      setRevealed({});
-    } catch {
-      // ignore
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const displayEntries =
-    editing && editing.file === current.filename
-      ? editing.entries
-      : current.entries;
-
-  return (
-    <div className="bg-surface-card rounded-xl p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h4 className="text-xs text-theme-secondary uppercase tracking-wider">
-            Environment Files
-          </h4>
-          <div className="flex items-center gap-1">
-            {envFiles.map((f, idx) => (
-              <button
-                key={f.filename}
-                onClick={() => setActiveFile(idx)}
-                className={`text-xs px-2 py-1 rounded transition ${
-                  idx === activeFile
-                    ? "bg-accent-600 text-white"
-                    : "bg-surface-input text-theme-secondary hover:text-theme-primary"
-                }`}
-              >
-                {f.filename}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handleReveal(current.filename)}
-            className="text-xs text-theme-secondary hover:text-theme-primary transition"
-          >
-            {revealed[current.filename] ? "Hide values" : "Reveal & Edit"}
+      {/* Add form */}
+      {showAdd && (
+        <div className="glass-card p-4 space-y-3">
+          <input value={projectName} onChange={(e) => setProjectName(e.target.value)}
+            placeholder="Project name (optional, defaults to repo name)"
+            className="w-full px-3 py-2 glass-input text-sm" />
+          <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)}
+            placeholder="GitHub URL (https://github.com/owner/repo)" autoFocus
+            className="w-full px-3 py-2 glass-input text-sm font-mono" />
+          <button onClick={handleAdd} disabled={addBusy || !repoUrl.trim()}
+            className="px-4 py-1.5 bg-accent-600 hover:bg-accent-700 text-white text-sm rounded-lg transition disabled:opacity-50">
+            {addBusy ? "Adding..." : "Add Project"}
           </button>
-          {editing && editing.file === current.filename && (
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="text-xs bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white px-3 py-1 rounded-lg transition"
-            >
-              {saving ? "Saving..." : "Save"}
+        </div>
+      )}
+
+      {/* Cards grid */}
+      {projects.length === 0 && !showAdd && (
+        <div className="glass-card p-8 text-center text-theme-muted space-y-3">
+          <p>No development projects yet.</p>
+          <button onClick={() => setShowAdd(true)} className="text-sm text-accent-400 hover:text-accent-300 transition">
+            Add your first project
+          </button>
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {projects.map((p) => (
+          <ProjectCard key={p.id} project={p} onSelect={() => setSelectedProject(p.id)} onRefresh={refresh} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Project Card ──────────────────────────────────────────────────────
+
+function ProjectCard({ project: p, onSelect, onRefresh }: {
+  project: DevProject;
+  onSelect: () => void;
+  onRefresh: () => void;
+}) {
+  const [cloning, setCloning] = useState(false);
+
+  async function handleClone() {
+    setCloning(true);
+    try {
+      await api.cloneDevProject(p.id);
+      // Poll for completion
+      const poll = setInterval(async () => {
+        const s = await api.getDevStatus();
+        const proj = s.projects.find((x) => x.id === p.id);
+        if (proj && proj.cloneStatus !== "cloning") {
+          clearInterval(poll);
+          setCloning(false);
+          onRefresh();
+        }
+      }, 2000);
+      setTimeout(() => { clearInterval(poll); setCloning(false); }, 120000);
+    } catch { setCloning(false); }
+  }
+
+  async function handleDelete() {
+    if (!confirm(`Delete project "${p.name}"?\n\nThis will remove the cloned files.`)) return;
+    try { await api.removeDevProject(p.id); onRefresh(); } catch {}
+  }
+
+  const isCloned = p.cloneStatus === "cloned";
+  const isError = p.cloneStatus === "error";
+  const isCloning = p.cloneStatus === "cloning" || cloning;
+
+  return (
+    <div className="glass-card p-4 space-y-3 cursor-pointer hover:border-accent-500/30 transition" onClick={onSelect}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="font-medium truncate">{p.name}</h3>
+          <p className="text-xs text-theme-muted truncate font-mono">{p.owner}/{p.repo}</p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+          {!isCloned && !isCloning && (
+            <button onClick={handleClone} className="px-2 py-1 text-xs bg-accent-600 hover:bg-accent-700 text-white rounded transition">
+              Clone
             </button>
           )}
+          {isCloned && (
+            <button onClick={handleClone} className="px-2 py-1 text-xs bg-surface-input hover:bg-surface-hover text-theme-secondary rounded transition">
+              Pull
+            </button>
+          )}
+          <button onClick={handleDelete} className="px-2 py-1 text-xs text-theme-muted hover:text-red-400 transition">
+            Delete
+          </button>
         </div>
       </div>
 
-      <div className="space-y-1 max-h-72 overflow-y-auto">
-        {displayEntries.map((entry, idx) => (
-          <div key={idx} className="flex items-center gap-2 text-xs font-mono">
-            {editing && editing.file === current.filename ? (
-              <>
-                <input
-                  type="text"
-                  value={entry.key}
-                  onChange={(e) => {
-                    const newEntries = [...editing.entries];
-                    newEntries[idx] = { ...newEntries[idx], key: e.target.value };
-                    setEditing({ ...editing, entries: newEntries });
-                  }}
-                  className="w-40 shrink-0 bg-surface-input border border-theme-input rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent-500"
-                />
-                <span className="text-theme-muted">=</span>
-                <input
-                  type="text"
-                  value={entry.value}
-                  onChange={(e) => {
-                    const newEntries = [...editing.entries];
-                    newEntries[idx] = { ...newEntries[idx], value: e.target.value };
-                    setEditing({ ...editing, entries: newEntries });
-                  }}
-                  className="flex-1 bg-surface-input border border-theme-input rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent-500"
-                />
-                <button
-                  onClick={() => {
-                    const newEntries = editing.entries.filter((_, i) => i !== idx);
-                    setEditing({ ...editing, entries: newEntries });
-                  }}
-                  className="text-theme-muted hover:text-red-400 transition shrink-0"
-                  title="Remove"
-                >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                    <path d="M4 4l8 8M12 4l-8 8" />
-                  </svg>
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="text-theme-secondary w-40 shrink-0 truncate">
-                  {entry.key}
-                </span>
-                <span className="text-theme-muted">=</span>
-                <span className="text-theme-muted truncate">{entry.value}</span>
-              </>
-            )}
-          </div>
+      {/* Status */}
+      <div className="flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full ${isCloned ? "bg-green-500" : isError ? "bg-red-500" : isCloning ? "bg-yellow-500 animate-pulse" : "bg-gray-500"}`} />
+        <span className="text-xs text-theme-secondary">
+          {isCloning ? "Cloning..." : isCloned ? "Cloned" : isError ? "Error" : "Not cloned"}
+        </span>
+        {p.lastClonedAt && (
+          <span className="text-[10px] text-theme-muted ml-auto">
+            {new Date(p.lastClonedAt).toLocaleDateString()}
+          </span>
+        )}
+      </div>
+
+      {isError && p.cloneError && (
+        <p className="text-xs status-error truncate">{p.cloneError}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Project Detail View ───────────────────────────────────────────────
+
+function ProjectDetail({ project, onBack, onRefresh }: {
+  project: DevProject;
+  onBack: () => void;
+  onRefresh: () => void;
+}) {
+  const [commits, setCommits] = useState<GitCommit[]>([]);
+  const [issues, setIssues] = useState<GitIssue[]>([]);
+  const [pulls, setPulls] = useState<GitPR[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"commits" | "issues" | "prs">("commits");
+
+  useEffect(() => {
+    Promise.all([
+      api.getProjectCommits(project.id).catch(() => []),
+      api.getProjectIssues(project.id).catch(() => []),
+      api.getProjectPulls(project.id).catch(() => []),
+    ]).then(([c, i, p]) => {
+      setCommits(c); setIssues(i); setPulls(p);
+    }).finally(() => setLoading(false));
+  }, [project.id]);
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button onClick={onBack} className="p-1.5 rounded hover:bg-surface-hover text-theme-secondary transition">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <div className="min-w-0">
+          <h2 className="text-base sm:text-lg font-semibold truncate">{project.name}</h2>
+          <p className="text-xs text-theme-muted font-mono">{project.owner}/{project.repo}</p>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-0.5 border-b border-theme">
+        {(["commits", "issues", "prs"] as const).map((tab) => (
+          <button key={tab} onClick={() => setActiveTab(tab)}
+            className={`px-3 py-2 text-xs font-medium transition border-b-2 -mb-px capitalize ${
+              activeTab === tab ? "border-accent-500 text-theme-primary" : "border-transparent text-theme-secondary hover:text-theme-primary"
+            }`}>
+            {tab === "prs" ? "Pull Requests" : tab} ({tab === "commits" ? commits.length : tab === "issues" ? issues.length : pulls.length})
+          </button>
         ))}
       </div>
 
-      {editing && editing.file === current.filename && (
-        <button
-          onClick={() => {
-            setEditing({
-              ...editing,
-              entries: [...editing.entries, { key: "", value: "" }],
-            });
-          }}
-          className="text-xs text-theme-secondary hover:text-theme-primary transition flex items-center gap-1"
-        >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M8 3v10M3 8h10" />
-          </svg>
-          Add variable
-        </button>
+      {loading ? (
+        <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-surface-hover border-t-accent-600 rounded-full animate-spin" /></div>
+      ) : (
+        <div className="space-y-2">
+          {activeTab === "commits" && commits.map((c) => (
+            <div key={c.sha} className="glass-card p-3 flex items-start gap-3">
+              <code className="text-xs text-accent-400 shrink-0 pt-0.5">{c.sha}</code>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-theme-primary truncate">{c.message}</p>
+                <p className="text-[10px] text-theme-muted">{c.author} &middot; {c.date ? new Date(c.date).toLocaleDateString() : ""}</p>
+              </div>
+            </div>
+          ))}
+
+          {activeTab === "issues" && issues.map((i) => (
+            <div key={i.number} className="glass-card p-3 flex items-start gap-3">
+              <span className="text-xs text-theme-muted shrink-0">#{i.number}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-theme-primary truncate">{i.title}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] text-theme-muted">{i.user}</span>
+                  {i.labels?.map((l) => (
+                    <span key={l} className="px-1.5 py-0.5 text-[9px] rounded bg-surface-input text-theme-secondary">{l}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {activeTab === "prs" && pulls.map((p) => (
+            <div key={p.number} className="glass-card p-3 flex items-start gap-3">
+              <span className="text-xs text-theme-muted shrink-0">#{p.number}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-theme-primary truncate">{p.title}</p>
+                <p className="text-[10px] text-theme-muted">{p.user} &middot; {p.head} &rarr; {p.base}</p>
+              </div>
+            </div>
+          ))}
+
+          {((activeTab === "commits" && commits.length === 0) ||
+            (activeTab === "issues" && issues.length === 0) ||
+            (activeTab === "prs" && pulls.length === 0)) && (
+            <div className="text-center py-8 text-theme-muted text-sm">
+              No {activeTab === "prs" ? "pull requests" : activeTab} found
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

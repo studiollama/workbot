@@ -113,6 +113,47 @@ router.post("/:service/connect", async (req, res) => {
   const resolvedName = instanceName?.trim() || "Default";
   const storeKey = makeInstanceId(service, slugifyInstance(resolvedName));
 
+  // Connection-based services: token = password, extras = connection params
+  if (config.kind === "connection") {
+    // Validate required connection fields
+    for (const field of config.connectionFields) {
+      if (field.required && !extras[field.key]?.trim()) {
+        return res.status(400).json({ error: `${field.label} is required` });
+      }
+    }
+
+    try {
+      const allParams: Record<string, string> = { ...extras, password: token || "" };
+      // Fill default values for missing optional fields
+      for (const field of config.connectionFields) {
+        if (!allParams[field.key] && field.defaultValue) {
+          allParams[field.key] = field.defaultValue;
+        }
+      }
+
+      const result = await config.validate(allParams);
+
+      // Persist connection params
+      const store = loadStore();
+      const savedExtras: Record<string, string> = {};
+      for (const field of config.connectionFields) {
+        if (allParams[field.key]) savedExtras[field.key] = allParams[field.key];
+      }
+      store[storeKey] = {
+        token: token || "",
+        user: result.user,
+        extras: savedExtras,
+        _instanceName: resolvedName,
+      };
+      saveStore(store);
+
+      return res.json({ connected: true, user: result.user, instanceId: storeKey });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? "Connection failed" });
+    }
+  }
+
+  // REST services: existing flow
   if (!token || typeof token !== "string") {
     return res.status(400).json({ error: "Token is required" });
   }
@@ -215,7 +256,7 @@ router.put("/:service/rename", (req, res) => {
 router.post("/:service/oauth/start", (req, res) => {
   const { service } = req.params;
   const config = SERVICES[service];
-  if (!config?.oauth) {
+  if (!config || config.kind !== "rest" || !config.oauth) {
     return res.status(400).json({ error: `Service "${service}" does not support OAuth.` });
   }
 
@@ -263,7 +304,7 @@ router.post("/:service/oauth/start", (req, res) => {
 router.post("/:service/oauth/reauth", (req, res) => {
   const { service } = req.params;
   const config = SERVICES[service];
-  if (!config?.oauth) {
+  if (!config || config.kind !== "rest" || !config.oauth) {
     return res.status(400).json({ error: `Service "${service}" does not support OAuth.` });
   }
 
@@ -331,7 +372,7 @@ router.get("/:service/oauth/callback", async (req, res) => {
 
   const { service } = req.params;
   const config = SERVICES[service];
-  if (!config?.oauth) {
+  if (!config || config.kind !== "rest" || !config.oauth) {
     return res.send(oauthResultPage(false, `Service "${service}" does not support OAuth.`));
   }
 
@@ -442,30 +483,33 @@ function oauthResultPage(success: boolean, detail: string): string {
 
 // GET /api/services/config — returns token URLs and display info (no secrets)
 router.get("/config", (_req, res) => {
-  const config: Record<
-    string,
-    {
-      name: string;
-      tokenUrl: string;
-      tokenPrefix: string;
-      extraFields?: { key: string; label: string; placeholder: string }[];
-      tokenLabel?: string;
-      authNote?: string;
-      difficulty?: string;
-      oauth?: { scopes: string[]; redirectPath: string };
-    }
-  > = {};
+  const config: Record<string, any> = {};
   for (const [key, svc] of Object.entries(SERVICES)) {
-    config[key] = {
-      name: svc.name,
-      tokenUrl: svc.tokenUrl,
-      tokenPrefix: svc.tokenPrefix,
-      ...(svc.extraFields ? { extraFields: svc.extraFields } : {}),
-      ...(svc.tokenLabel ? { tokenLabel: svc.tokenLabel } : {}),
-      ...(svc.authNote ? { authNote: svc.authNote } : {}),
-      ...(svc.difficulty ? { difficulty: svc.difficulty } : {}),
-      ...(svc.oauth ? { oauth: { scopes: svc.oauth.scopes, redirectPath: svc.oauth.redirectPath } } : {}),
-    };
+    if (svc.kind === "connection") {
+      config[key] = {
+        name: svc.name,
+        kind: "connection",
+        protocol: svc.protocol,
+        connectionFields: svc.connectionFields,
+        defaultPort: svc.defaultPort,
+        docsUrl: svc.docsUrl,
+        ...(svc.tokenLabel ? { tokenLabel: svc.tokenLabel } : {}),
+        ...(svc.authNote ? { authNote: svc.authNote } : {}),
+        ...(svc.difficulty ? { difficulty: svc.difficulty } : {}),
+      };
+    } else {
+      config[key] = {
+        name: svc.name,
+        kind: "rest",
+        tokenUrl: svc.tokenUrl,
+        tokenPrefix: svc.tokenPrefix,
+        ...(svc.extraFields ? { extraFields: svc.extraFields } : {}),
+        ...(svc.tokenLabel ? { tokenLabel: svc.tokenLabel } : {}),
+        ...(svc.authNote ? { authNote: svc.authNote } : {}),
+        ...(svc.difficulty ? { difficulty: svc.difficulty } : {}),
+        ...(svc.oauth ? { oauth: { scopes: svc.oauth.scopes, redirectPath: svc.oauth.redirectPath } } : {}),
+      };
+    }
   }
   config.codex = {
     name: "Codex (ChatGPT)",

@@ -142,7 +142,7 @@ export default function WorkflowEditor({ workflowId, scope, onSave, onCancel }: 
       {error && <div className="bg-red-900/50 border border-red-700 rounded-lg p-2 text-red-300 text-xs">{error}</div>}
 
       {/* Basic info */}
-      <div className="bg-surface-card rounded-xl p-4 space-y-3">
+      <div className="glass-card p-4 space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-theme-secondary mb-1">Name</label>
@@ -165,7 +165,7 @@ export default function WorkflowEditor({ workflowId, scope, onSave, onCancel }: 
 
       {/* DAG Preview */}
       {data.nodes.length > 0 && (
-        <div className="bg-surface-card rounded-xl p-4">
+        <div className="glass-card p-4">
           <p className="text-xs text-theme-secondary mb-2">DAG Preview</p>
           <WorkflowDagView nodes={data.nodes} edges={data.edges} onNodeClick={(id) => setEditingNode(editingNode === id ? null : id)} />
         </div>
@@ -185,7 +185,7 @@ export default function WorkflowEditor({ workflowId, scope, onSave, onCancel }: 
         </div>
 
         {data.nodes.map((node) => (
-          <div key={node.id} className="bg-surface-card rounded-xl p-3 space-y-2">
+          <div key={node.id} className="glass-card p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className={`px-1.5 py-0.5 text-[10px] font-mono rounded ${

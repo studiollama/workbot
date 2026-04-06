@@ -70,4 +70,11 @@ export const MCP_TOOLS = [
   { name: "agents_write", description: "Write updated context to AGENTS.md for cloud agents." },
   { name: "service_status", description: "List all workbot services and their connection status." },
   { name: "service_request", description: "Make an authenticated HTTP request to any connected service." },
+  { name: "common_search", description: "BM25 keyword search on common knowledge (shared brain)." },
+  { name: "common_vsearch", description: "Vector semantic search on common knowledge." },
+  { name: "common_get", description: "Read a note from common knowledge." },
+  { name: "common_write", description: "Write a note to common knowledge (shared across all agents)." },
+  { name: "common_list", description: "List notes in common knowledge." },
+  { name: "common_commit", description: "Git commit pending changes in common knowledge." },
+  { name: "common_move", description: "Move a note from private brain to common knowledge (host only)." },
 ];

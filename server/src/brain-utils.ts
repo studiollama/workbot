@@ -12,7 +12,7 @@ export function getAllNotes(): string[] {
   function walk(dir: string) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
-      if (entry.isDirectory() && !entry.name.startsWith(".")) {
+      if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "subagents" && entry.name !== "common") {
         walk(full);
       } else if (entry.isFile() && extname(entry.name) === ".md") {
         results.push(relative(BRAIN_ROOT, full).replace(/\\/g, "/"));
@@ -154,12 +154,14 @@ export function buildLinkGraph(): Map<string, { outgoing: string[]; incoming: st
 
     const entry = graph.get(n)!;
     for (const link of links) {
-      entry.outgoing.push(link);
-
-      // Resolve link to a path
+      // Resolve wikilink to a note path (like Obsidian: match by title or alias)
       const resolved = titleToPath.get(link.toLowerCase());
       if (resolved && graph.has(resolved)) {
+        entry.outgoing.push(resolved);
         graph.get(resolved)!.incoming.push(n);
+      } else {
+        // Unresolved link — keep raw text for display but won't create graph edge
+        entry.outgoing.push(link);
       }
     }
   }

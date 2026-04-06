@@ -39,7 +39,8 @@
       "Bash(npx tsc:*)",
       "Bash(npx tsx:*)",
       "Bash(claude mcp:*)",
-      "mcp__workbot__git_credentials"
+      "mcp__workbot__git_credentials",
+      "Bash(curl -ks https://localhost:5192/)"
     ]
   },
   "enableAllProjectMcpServers": true,

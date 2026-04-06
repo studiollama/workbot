@@ -4,61 +4,86 @@ import { STORE_DIR } from "./services.js";
 
 const DEV_CONFIG_PATH = join(STORE_DIR, "development.json");
 
-export interface DevConfig {
-  repoUrl: string | null;
-  owner: string | null;
-  repo: string | null;
+export interface DevProject {
+  id: string;
+  name: string;
+  repoUrl: string;
+  owner: string;
+  repo: string;
   cloneStatus: "idle" | "cloning" | "cloned" | "error";
   cloneError: string | null;
   lastClonedAt: string | null;
-  analysisStatus: "idle" | "running" | "done" | "error";
-  analysisError: string | null;
+  createdAt: string;
 }
 
-const DEFAULTS: DevConfig = {
-  repoUrl: null,
-  owner: null,
-  repo: null,
-  cloneStatus: "idle",
-  cloneError: null,
-  lastClonedAt: null,
-  analysisStatus: "idle",
-  analysisError: null,
-};
+export interface DevConfigStore {
+  projects: DevProject[];
+}
 
-export function loadDevConfig(): DevConfig {
-  try {
-    if (!existsSync(DEV_CONFIG_PATH)) return { ...DEFAULTS };
-    const raw = JSON.parse(readFileSync(DEV_CONFIG_PATH, "utf-8"));
+// ── Backward compatibility: migrate old single-repo config ──────────
+
+function migrateOldConfig(raw: any): DevConfigStore {
+  if (Array.isArray(raw.projects)) return raw as DevConfigStore;
+  // Old format: single repo at top level
+  if (raw.repoUrl && raw.owner && raw.repo) {
+    const id = raw.repo.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     return {
-      repoUrl: typeof raw.repoUrl === "string" ? raw.repoUrl : null,
-      owner: typeof raw.owner === "string" ? raw.owner : null,
-      repo: typeof raw.repo === "string" ? raw.repo : null,
-      cloneStatus: ["idle", "cloning", "cloned", "error"].includes(raw.cloneStatus)
-        ? raw.cloneStatus
-        : "idle",
-      cloneError: typeof raw.cloneError === "string" ? raw.cloneError : null,
-      lastClonedAt: typeof raw.lastClonedAt === "string" ? raw.lastClonedAt : null,
-      analysisStatus: ["idle", "running", "done", "error"].includes(raw.analysisStatus)
-        ? raw.analysisStatus
-        : "idle",
-      analysisError: typeof raw.analysisError === "string" ? raw.analysisError : null,
+      projects: [{
+        id,
+        name: raw.repo,
+        repoUrl: raw.repoUrl,
+        owner: raw.owner,
+        repo: raw.repo,
+        cloneStatus: raw.cloneStatus || "idle",
+        cloneError: raw.cloneError || null,
+        lastClonedAt: raw.lastClonedAt || null,
+        createdAt: new Date().toISOString(),
+      }],
     };
+  }
+  return { projects: [] };
+}
+
+export function loadDevConfig(): DevConfigStore {
+  try {
+    if (!existsSync(DEV_CONFIG_PATH)) return { projects: [] };
+    const raw = JSON.parse(readFileSync(DEV_CONFIG_PATH, "utf-8"));
+    return migrateOldConfig(raw);
   } catch {
-    return { ...DEFAULTS };
+    return { projects: [] };
   }
 }
 
-export function saveDevConfig(config: Partial<DevConfig>) {
-  const current = loadDevConfig();
-  const merged = { ...current, ...config };
+export function saveDevConfig(config: DevConfigStore) {
   if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
-  writeFileSync(DEV_CONFIG_PATH, JSON.stringify(merged, null, 2));
+  writeFileSync(DEV_CONFIG_PATH, JSON.stringify(config, null, 2));
+}
+
+export function getProject(id: string): DevProject | undefined {
+  return loadDevConfig().projects.find((p) => p.id === id);
+}
+
+export function addProject(project: DevProject) {
+  const config = loadDevConfig();
+  config.projects.push(project);
+  saveDevConfig(config);
+}
+
+export function updateProject(id: string, updates: Partial<DevProject>) {
+  const config = loadDevConfig();
+  const idx = config.projects.findIndex((p) => p.id === id);
+  if (idx < 0) return;
+  config.projects[idx] = { ...config.projects[idx], ...updates };
+  saveDevConfig(config);
+}
+
+export function removeProject(id: string) {
+  const config = loadDevConfig();
+  config.projects = config.projects.filter((p) => p.id !== id);
+  saveDevConfig(config);
 }
 
 export function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
-  // Supports: https://github.com/owner/repo, https://github.com/owner/repo.git,
-  // git@github.com:owner/repo.git
   const httpsMatch = url.match(/github\.com\/([^/]+)\/([^/.]+)/);
   if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] };
   const sshMatch = url.match(/github\.com:([^/]+)\/([^/.]+)/);

@@ -79,9 +79,9 @@ export default function WorkflowsPanel({ scope }: { scope?: string } = {}) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Workflows</h2>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base sm:text-lg font-semibold">Workflows</h2>
           <p className="text-xs text-theme-muted mt-0.5">DAG-based task orchestration</p>
         </div>
         <button
@@ -171,8 +171,8 @@ function WorkflowCard({
   } as Record<string, string>;
 
   return (
-    <div className="bg-surface-card rounded-xl p-4 space-y-3">
-      <div className="flex items-start justify-between gap-3">
+    <div className="glass-card p-3 sm:p-4 space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-medium truncate">{wf.name}</h3>

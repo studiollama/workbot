@@ -11,6 +11,7 @@ import { join } from "path";
 import { execFileSync } from "child_process";
 import { STORE_DIR, PROJECT_ROOT } from "./paths.js";
 import { BRAIN_ROOT } from "./brain-utils.js";
+import { ensureCommonBrainDir } from "./common-brain-utils.js";
 
 const SUBAGENTS_PATH = join(STORE_DIR, "subagents.json");
 
@@ -31,6 +32,7 @@ export interface SubagentDefinition {
   };
   bypassPermissions?: boolean;
   autoSpawn?: boolean;
+  commonReadOnly?: boolean; // If true, agent only gets read tools for common knowledge
   systemPromptPath?: string;
 }
 
@@ -59,6 +61,7 @@ export function createSubagent(input: {
   description?: string;
   allowedServices?: string[];
   claudeAuth?: SubagentDefinition["claudeAuth"];
+  commonReadOnly?: boolean;
   systemPromptPath?: string;
 }): SubagentDefinition {
   const id = input.name
@@ -84,11 +87,15 @@ export function createSubagent(input: {
     brainPath,
     qmdIndex: qmdIndexDir,
     claudeAuth: input.claudeAuth ?? { mode: "host-spawned" },
+    commonReadOnly: input.commonReadOnly ?? false,
     systemPromptPath: input.systemPromptPath,
   };
 
   // Create brain directory structure
   ensureBrainDir(subagent);
+
+  // Ensure common knowledge brain exists with correct permissions
+  ensureCommonBrainDir();
 
   // Create QMD index directory
   mkdirSync(qmdIndexDir, { recursive: true });
@@ -116,6 +123,7 @@ export function createSubagent(input: {
   const claudeDir = join(brainDir, ".claude");
   mkdirSync(claudeDir, { recursive: true });
   const mcpPrefix = `mcp__${mcpServerName}__`;
+  const commonReadOnly = !!input.commonReadOnly;
   const mcpToolPerms = [
     `${mcpPrefix}brain_search`,
     `${mcpPrefix}brain_vsearch`,
@@ -127,6 +135,15 @@ export function createSubagent(input: {
     `${mcpPrefix}service_status`,
     `${mcpPrefix}service_request`,
     `${mcpPrefix}git_credentials`,
+    `${mcpPrefix}common_search`,
+    `${mcpPrefix}common_vsearch`,
+    `${mcpPrefix}common_get`,
+    `${mcpPrefix}common_list`,
+    // Write tools only if not read-only
+    ...(commonReadOnly ? [] : [
+      `${mcpPrefix}common_write`,
+      `${mcpPrefix}common_commit`,
+    ]),
     `${mcpPrefix}debug_env`,
   ];
   // Project-level settings.local.json — permissions + hooks
@@ -209,6 +226,8 @@ export function updateSubagent(
   const idx = all.findIndex((s) => s.id === id);
   if (idx < 0) throw new Error(`Subagent "${id}" not found`);
 
+  const oldName = all[idx].name;
+
   all[idx] = {
     ...all[idx],
     ...updates,
@@ -218,6 +237,18 @@ export function updateSubagent(
   };
 
   saveSubagents(all);
+
+  // Update CLAUDE.md header if name changed
+  if (updates.name && updates.name !== oldName) {
+    const brainDir = join(BRAIN_ROOT, all[idx].brainPath);
+    const claudeMdPath = join(brainDir, "CLAUDE.md");
+    if (existsSync(claudeMdPath)) {
+      const content = readFileSync(claudeMdPath, "utf-8");
+      const updated = content.replace(/^# .+$/m, `# ${updates.name}`);
+      writeFileSync(claudeMdPath, updated);
+    }
+  }
+
   return all[idx];
 }
 
@@ -337,11 +368,30 @@ Subagent of the Workbot system. Your brain is this directory.
 - \`knowledge/projects/\` — Project state
 - \`inbox/\` — Unprocessed captures
 
+## Common Knowledge (Shared Brain)
+
+There is a **common knowledge brain** shared across all agents. Use it for knowledge that benefits everyone — database schemas, network infrastructure, shared decisions, etc.
+
+**Common knowledge tools:**
+- \`common_search\` / \`common_vsearch\` — search shared knowledge
+- \`common_get\` — read a shared note
+- \`common_write\` — write/update a shared note
+- \`common_list\` — list shared notes
+- \`common_commit\` — **required** after writing — git commits your changes with your identity
+
+**When to use common vs private brain:**
+- **Common:** Facts about infrastructure, services, schemas, shared decisions, patterns useful to all agents
+- **Private:** Your task context, session state, agent-specific notes
+
+**Important:** Always call \`common_commit\` with a descriptive message after writing to common knowledge. Changes are tracked in git with your agent identity.
+
 ## Boundaries
 
-- You can only access YOUR brain directory, not the host brain or other subagents
+- You can only access YOUR private brain directory, not the host brain or other subagents
+- You CAN read and write to the common knowledge brain (shared with all agents)
 - You can only use services that have been assigned to you
 - Write to your brain when you learn something reusable
+- Write to common knowledge when others would benefit from the knowledge
 `);
   }
 }

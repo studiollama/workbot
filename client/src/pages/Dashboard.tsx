@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import { useServices } from "../context/ServicesContext";
 import ServiceDrawer from "../components/ServiceDrawer";
@@ -9,34 +10,51 @@ import SkillsPanel from "../components/SkillsPanel";
 import LogsPanel from "../components/LogsPanel";
 import WorkflowsPanel from "../components/WorkflowsPanel";
 import SubagentsPanel from "../components/SubagentsPanel";
+import BrainPanel from "../components/BrainPanel";
 
+// Brand logos from cdn.simpleicons.org (SVG, auto-colored)
+const SERVICE_LOGOS: Record<string, { icon: string; color: string }> = {
+  github:      { icon: "github", color: "white" },
+  airtable:    { icon: "airtable", color: "18BFFF" },
+  asana:       { icon: "asana", color: "F06A6A" },
+  zendesk:     { icon: "zendesk", color: "03363D" },
+  squarespace: { icon: "squarespace", color: "000000" },
+  freshdesk:   { icon: "freshdesk", color: "058B38" },
+  quickbooks:  { icon: "quickbooks", color: "2CA01C" },
+  googleads:   { icon: "googleads", color: "4285F4" },
+  canva:       { icon: "canva", color: "00C4CC" },
+  gmail:       { icon: "gmail", color: "EA4335" },
+  stripe:      { icon: "stripe", color: "635BFF" },
+  supabase:    { icon: "supabase", color: "3FCF8E" },
+  render:      { icon: "render", color: "46E3B7" },
+  postgresql:  { icon: "postgresql", color: "4169E1" },
+  // oracle uses inline SVG below (not on simpleicons)
+  dagster:     { icon: "dagster", color: "4F43DD" },
+};
+
+// Fallback text icons for services without simple-icons
 const SERVICE_ICONS: Record<string, string> = {
-  github: "GH",
-  airtable: "AT",
-  asana: "AS",
-  zendesk: "ZD",
   codex: "CX",
-  squarespace: "SQ",
-  freshdesk: "FD",
-  quickbooks: "QB",
-  googleads: "GA",
   entra: "EN",
   intune: "IN",
   security: "SC",
-  canva: "CV",
   nanobanana: "NB",
   jules: "JL",
   sharepoint: "SP",
   outlook: "OL",
-  gmail: "GM",
   googleadmin: "GC",
   ticktick: "TT",
   readai: "RA",
-  dagster: "DG",
-  render: "RN",
-  stripe: "ST",
-  supabase: "SB",
+  oracle: "OR",
+  postgresql: "PG",
+  ssh: "SSH",
+  sftp: "SF",
+  ftp: "FTP",
+  telnet: "TN",
 };
+
+// Microsoft services use the MS logo
+const MS_SERVICES = new Set(["entra", "intune", "security", "sharepoint", "outlook"]);
 
 interface DashboardProps {
   onLogout: () => void;
@@ -47,7 +65,12 @@ export default function Dashboard({ onLogout }: DashboardProps) {
     useServices();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"services" | "mcp" | "development" | "skills" | "logs" | "workflows" | "subagents">("services");
+  const { tab: urlTab, "*": urlRest } = useParams();
+  const navigate = useNavigate();
+  const validTabs = ["services", "agents", "brain", "workflows", "mcp", "skills", "logs", "development"] as const;
+  type TabKey = typeof validTabs[number];
+  const activeTab: TabKey = validTabs.includes(urlTab as any) ? (urlTab as TabKey) : "services";
+  const setActiveTab = (tab: TabKey) => navigate(`/${tab}${tab === "brain" && urlRest ? `/${urlRest}` : ""}`);
   const [subagents, setSubagents] = useState<any[]>([]);
 
   const fetchSubagents = useCallback(async () => {
@@ -64,138 +87,88 @@ export default function Dashboard({ onLogout }: DashboardProps) {
     );
   }
 
+  const tabs = [
+    { key: "services", label: "Services" },
+    { key: "agents", label: "Agents" },
+    { key: "brain", label: "Brain" },
+    { key: "workflows", label: "Workflows" },
+    { key: "mcp", label: "MCP" },
+    { key: "skills", label: "Skills" },
+    { key: "logs", label: "Logs" },
+    { key: "development", label: "Dev" },
+  ] as const;
+
+  const isBrainTab = activeTab === "brain";
+
   return (
-    <div className="min-h-screen p-6">
-      <div className="max-w-3xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{workbotName}</h1>
-            <p className="text-theme-secondary text-sm mt-1">Service Connections</p>
+    <div className="min-h-screen p-3 sm:p-6">
+      <div className={`mx-auto space-y-4 sm:space-y-6 transition-all ${isBrainTab ? "max-w-7xl" : "max-w-3xl"}`}>
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-2xl font-bold truncate">{workbotName}</h1>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Kill switch */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               onClick={async () => {
                 if (!confirm("Shut down the workbot container?\n\nThis will stop all sessions, subagents, and the dashboard.\nThe container will need to be restarted manually.")) return;
-                try { await api.shutdown(); } catch { /* connection will drop */ }
+                try { await api.shutdown(); } catch {}
               }}
-              className="p-2 rounded-lg bg-red-900/50 hover:bg-red-800 text-red-400 hover:text-red-300 transition"
+              className="p-1.5 sm:p-2 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-500 hover:text-red-600 dark:bg-red-900/40 dark:hover:bg-red-800 dark:text-red-400 dark:hover:text-red-300 transition"
               title="Shutdown container"
             >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M10 2v8" />
-                <path d="M14.5 4.5a7 7 0 11-9 0" />
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10 2v8" /><path d="M14.5 4.5a7 7 0 11-9 0" />
               </svg>
             </button>
-            {/* Settings (gear) */}
             <button
               onClick={() => setSettingsOpen(true)}
-              className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
+              className="p-1.5 sm:p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
               title="Settings"
             >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
                 <path d="M16.2 12.8a1.3 1.3 0 00.26 1.43l.05.05a1.575 1.575 0 11-2.23 2.23l-.05-.05a1.3 1.3 0 00-1.43-.26 1.3 1.3 0 00-.79 1.19v.14a1.575 1.575 0 11-3.15 0v-.07a1.3 1.3 0 00-.85-1.19 1.3 1.3 0 00-1.43.26l-.05.05a1.575 1.575 0 11-2.23-2.23l.05-.05a1.3 1.3 0 00.26-1.43 1.3 1.3 0 00-1.19-.79h-.14a1.575 1.575 0 110-3.15h.07a1.3 1.3 0 001.19-.85 1.3 1.3 0 00-.26-1.43l-.05-.05a1.575 1.575 0 112.23-2.23l.05.05a1.3 1.3 0 001.43.26h.06a1.3 1.3 0 00.79-1.19v-.14a1.575 1.575 0 013.15 0v.07a1.3 1.3 0 00.79 1.19 1.3 1.3 0 001.43-.26l.05-.05a1.575 1.575 0 112.23 2.23l-.05.05a1.3 1.3 0 00-.26 1.43v.06a1.3 1.3 0 001.19.79h.14a1.575 1.575 0 010 3.15h-.07a1.3 1.3 0 00-1.19.79z" />
               </svg>
             </button>
-            {/* Logout */}
             <button
-              onClick={async () => {
-                await api.dashboardLogout();
-                onLogout();
-              }}
-              className="p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
+              onClick={async () => { await api.dashboardLogout(); onLogout(); }}
+              className="p-1.5 sm:p-2 rounded-lg bg-surface-input hover:bg-surface-hover text-theme-secondary hover:text-theme-primary transition"
               title="Sign out"
             >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M7 17H4a1 1 0 01-1-1V4a1 1 0 011-1h3" />
-                <path d="M14 14l3-4-3-4" />
-                <path d="M17 10H7" />
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M7 17H4a1 1 0 01-1-1V4a1 1 0 011-1h3" /><path d="M14 14l3-4-3-4" /><path d="M17 10H7" />
               </svg>
             </button>
           </div>
         </div>
 
-        {/* Tab bar */}
-        <div className="flex gap-1 border-b border-theme">
-          <button
-            onClick={() => setActiveTab("services")}
-            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
-              activeTab === "services"
-                ? "border-accent-500 text-theme-primary"
-                : "border-transparent text-theme-secondary hover:text-theme-primary"
-            }`}
-          >
-            Services
-          </button>
-          <button
-            onClick={() => setActiveTab("mcp")}
-            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
-              activeTab === "mcp"
-                ? "border-accent-500 text-theme-primary"
-                : "border-transparent text-theme-secondary hover:text-theme-primary"
-            }`}
-          >
-            MCP
-          </button>
-          <button
-            onClick={() => setActiveTab("development")}
-            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
-              activeTab === "development"
-                ? "border-accent-500 text-theme-primary"
-                : "border-transparent text-theme-secondary hover:text-theme-primary"
-            }`}
-          >
-            Development
-          </button>
-          <button
-            onClick={() => setActiveTab("skills")}
-            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
-              activeTab === "skills"
-                ? "border-accent-500 text-theme-primary"
-                : "border-transparent text-theme-secondary hover:text-theme-primary"
-            }`}
-          >
-            Skills
-          </button>
-          <button
-            onClick={() => setActiveTab("workflows")}
-            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
-              activeTab === "workflows"
-                ? "border-accent-500 text-theme-primary"
-                : "border-transparent text-theme-secondary hover:text-theme-primary"
-            }`}
-          >
-            Workflows
-          </button>
-          <button
-            onClick={() => setActiveTab("subagents")}
-            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
-              activeTab === "subagents"
-                ? "border-accent-500 text-theme-primary"
-                : "border-transparent text-theme-secondary hover:text-theme-primary"
-            }`}
-          >
-            Subagents
-          </button>
-          <button
-            onClick={() => setActiveTab("logs")}
-            className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
-              activeTab === "logs"
-                ? "border-accent-500 text-theme-primary"
-                : "border-transparent text-theme-secondary hover:text-theme-primary"
-            }`}
-          >
-            Logs
-          </button>
+        {/* Tab bar — scrollable on mobile */}
+        <div className="overflow-x-auto -mx-3 sm:-mx-0 px-3 sm:px-0 scrollbar-hide">
+          <div className="flex gap-0.5 border-b border-theme min-w-max">
+            {tabs.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key as TabKey)}
+                className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition border-b-2 -mb-px whitespace-nowrap ${
+                  activeTab === key
+                    ? "border-accent-500 text-theme-primary"
+                    : "border-transparent text-theme-secondary hover:text-theme-primary"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {activeTab === "mcp" && <McpPanel />}
         {activeTab === "development" && <DevPanel />}
         {activeTab === "skills" && <SkillsPanel />}
         {activeTab === "workflows" && <WorkflowsPanel />}
-        {activeTab === "subagents" && <SubagentsPanel />}
+        {activeTab === "agents" && <SubagentsPanel />}
         {activeTab === "logs" && <LogsPanel />}
+        {activeTab === "brain" && <BrainPanel />}
 
         {activeTab === "services" && (() => {
           const connected = enabledServices.filter(
@@ -360,10 +333,10 @@ function InstanceRow({ instId, inst, onUpdate }: {
             <button onClick={() => setEditing(false)} className="text-[10px] text-theme-muted">cancel</button>
           </div>
         ) : (
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-theme-primary truncate">{inst.instanceName || instId}</span>
-            {inst.user && <span className="text-[10px] text-theme-muted">{inst.user}</span>}
-            <button onClick={() => setEditing(true)} className="text-[10px] text-theme-muted hover:text-accent-400 transition">rename</button>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-xs text-theme-primary font-medium truncate" title={instId}>{inst.instanceName || instId}</span>
+            {inst.user && <span className="text-[10px] text-theme-muted truncate max-w-[120px]" title={inst.user}>{inst.user}</span>}
+            <button onClick={() => setEditing(true)} className="text-[10px] text-theme-muted hover:text-accent-400 transition shrink-0">rename</button>
           </div>
         )}
       </div>
@@ -570,37 +543,52 @@ function ServiceCard({
       : "API Token";
 
   return (
-    <div className="bg-surface-card rounded-xl p-5 space-y-3">
+    <div className="glass-card p-4 sm:p-5 space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-surface-input flex items-center justify-center text-sm font-bold text-theme-secondary">
-            {SERVICE_ICONS[serviceKey] ?? "?"}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-lg bg-surface-input flex items-center justify-center overflow-hidden shrink-0">
+            {SERVICE_LOGOS[serviceKey] ? (
+              <img
+                src={`https://cdn.simpleicons.org/${SERVICE_LOGOS[serviceKey].icon}/${SERVICE_LOGOS[serviceKey].color}`}
+                alt={name}
+                className="w-6 h-6"
+                loading="lazy"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).parentElement!.innerHTML = `<span class="text-[10px] font-bold text-theme-secondary">${SERVICE_ICONS[serviceKey] ?? serviceKey.substring(0, 2).toUpperCase()}</span>`; }}
+              />
+            ) : serviceKey === "oracle" ? (
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="#F80000"><path d="M7.076 7.076C4.952 7.076 3.215 8.813 3.215 10.937v2.126c0 2.124 1.737 3.861 3.861 3.861h9.848c2.124 0 3.861-1.737 3.861-3.861v-2.126c0-2.124-1.737-3.861-3.861-3.861H7.076zm9.848 1.693c1.197 0 2.168.971 2.168 2.168v2.126c0 1.197-.971 2.168-2.168 2.168H7.076c-1.197 0-2.168-.971-2.168-2.168v-2.126c0-1.197.971-2.168 2.168-2.168h9.848z"/></svg>
+            ) : MS_SERVICES.has(serviceKey) ? (
+              <img
+                src="https://cdn.simpleicons.org/microsoft/00A4EF"
+                alt={name}
+                className="w-6 h-6"
+                loading="lazy"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).parentElement!.innerHTML = `<span class="text-[10px] font-bold text-theme-secondary">MS</span>`; }}
+              />
+            ) : (
+              <span className="text-[10px] font-bold text-theme-secondary">{SERVICE_ICONS[serviceKey] ?? serviceKey.substring(0, 2).toUpperCase()}</span>
+            )}
           </div>
-          <div>
-            <h3 className="font-medium">{name}</h3>
+          <div className="min-w-0">
+            <h3 className="font-medium truncate">{name}</h3>
             {status.connected && status.user && (
-              <p className="text-xs text-theme-secondary">{status.user}</p>
+              <p className="text-xs text-theme-secondary truncate">{status.user}</p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {difficulty &&
-            (() => {
-              const style =
-                DIFFICULTY_STYLES[difficulty] ?? DIFFICULTY_STYLES["API Key"];
-              return (
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${style.bg} ${style.text} ${style.border}`}
-                >
-                  {difficulty}
-                </span>
-              );
-            })()}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {difficulty && (() => {
+            const style = DIFFICULTY_STYLES[difficulty] ?? DIFFICULTY_STYLES["API Key"];
+            return (
+              <span className={`w-2 h-2 rounded-full ${style.bg}`} title={difficulty} />
+            );
+          })()}
           <span
-            className={`w-3 h-3 rounded-full border ${
-              status.connected ? "bg-green-500 border-green-500" : "bg-surface-hover border-theme"
+            className={`w-2.5 h-2.5 rounded-full ${
+              status.connected ? "bg-green-500" : "bg-surface-hover border border-theme"
             }`}
+            title={status.connected ? "Connected" : "Not connected"}
           />
         </div>
       </div>

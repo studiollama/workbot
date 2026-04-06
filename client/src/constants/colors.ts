@@ -27,7 +27,7 @@ function tint(
 }
 
 /** Generate surface/border/text theme from an accent color's 500-shade */
-export function generateTheme(color: AccentColor) {
+export function generateTheme(color: AccentColor, mode: "dark" | "light" = "dark") {
   if (color.mono) {
     return {
       surfaces: {
@@ -36,27 +36,49 @@ export function generateTheme(color: AccentColor) {
         input: "245 245 245",
         hover: "235 235 235",
       },
-      borders: { default: "0 0 0", input: "0 0 0" },
-      text: { primary: "0 0 0", secondary: "64 64 64", muted: "128 128 128" },
+      borders: { default: "218 222 230", input: "203 209 219" },
+      text: { primary: "15 23 42", secondary: "71 85 105", muted: "148 163 184" },
     };
   }
 
   const accent = parse(color.shades[500]);
-  const t = 0.08; // subtle tint ratio
 
+  if (mode === "light") {
+    const t = 0.06; // subtle accent tint into white bases
+    return {
+      surfaces: {
+        page: tint([246, 248, 252], accent, t),
+        card: tint([255, 255, 255], accent, t * 0.5),
+        input: tint([241, 243, 247], accent, t),
+        hover: tint([230, 233, 239], accent, t),
+      },
+      borders: {
+        default: tint([218, 222, 230], accent, 0.1),
+        input: tint([203, 209, 219], accent, 0.1),
+      },
+      text: {
+        primary: "15 23 42",
+        secondary: "71 85 105",
+        muted: "148 163 184",
+      },
+    };
+  }
+
+  // Dark mode (default)
+  const t = 0.08;
   return {
     surfaces: {
-      page: tint([3, 7, 18], accent, t),       // gray-950 base
-      card: tint([17, 24, 39], accent, t),      // gray-900 base
-      input: tint([31, 41, 55], accent, t),     // gray-800 base
-      hover: tint([55, 65, 81], accent, t),     // gray-700 base
+      page: tint([3, 7, 18], accent, t),
+      card: tint([17, 24, 39], accent, t),
+      input: tint([31, 41, 55], accent, t),
+      hover: tint([55, 65, 81], accent, t),
     },
     borders: {
-      default: tint([31, 41, 55], accent, 0.12),  // gray-800 + more tint
-      input: tint([55, 65, 81], accent, 0.12),     // gray-700 + more tint
+      default: tint([31, 41, 55], accent, 0.12),
+      input: tint([55, 65, 81], accent, 0.12),
     },
     text: {
-      primary: "243 244 246",    // gray-100 (stays constant for readability)
+      primary: "243 244 246",
       secondary: "156 163 175",  // gray-400
       muted: "107 114 128",     // gray-500
     },

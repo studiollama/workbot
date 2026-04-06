@@ -4,13 +4,15 @@ AI work automation platform with a persistent Obsidian-based brain, service inte
 
 ## Features
 
-- **Dashboard** — HTTPS web UI with login, service management, MCP tools, skills, workflows, logs, and subagents
-- **Brain** — Obsidian vault with QMD-powered BM25 + vector search, wikilinked knowledge graph
-- **Services** — 25+ integrations (GitHub, Gmail, Airtable, Azure AD, Stripe, etc.) with encrypted tokens
+- **Dashboard** — HTTPS web UI with dark/light mode (glassmorphism), service management, brain viewer, MCP tools, skills, workflows, logs, and subagents
+- **Brain** — Obsidian vault with QMD-powered BM25 + vector search, wikilinked knowledge graph, interactive graph view, folder navigation, inline editor, cross-brain linking
+- **Common Knowledge** — Shared brain accessible to all agents with git-tracked changes, per-agent commit identity, and read-only mode option
+- **Services** — 25+ integrations with multi-instance support (multiple keys per service type), encrypted tokens (AES-256-GCM), and `git_credentials` tool for native git operations
 - **Workflows** — DAG-based orchestration with shell, Python, MCP tool, Claude prompt, and brain write nodes. Cron scheduling, webhooks, conditional edges
-- **Subagents** — Isolated agents with scoped brains, filtered service access, and independent Claude accounts
-- **Security** — HTTPS (auto-generated self-signed certs), bcrypt auth, AES-256-GCM encrypted secrets at rest, MCP audit logging with secret redaction
-- **MCP Server** — 30+ tools for brain search, service requests, workflow management, subagent control, and service context
+- **Subagents** — Isolated agents with Linux user separation, scoped brains, filtered services, web terminals (ttyd), auto-spawn, tmux sessions, independent Claude accounts, per-agent dashboard logins with key holder support
+- **Development** — Multi-project management with GitHub integration, per-project clone/pull, commits/issues/PRs view, automatic migration from legacy single-folder setup
+- **Security** — HTTPS (auto-generated certs), bcrypt auth, AES-256-GCM encrypted secrets, MCP audit logging with secret redaction, subagent process isolation (uid validation, file permissions), internal-only decryption API
+- **MCP Server** — 40+ tools for brain search, common knowledge, service requests, git credentials, workflow management, subagent control, and service context
 
 ## Requirements
 
@@ -467,3 +469,42 @@ workbot/
   .mcp.json                # MCP server configuration
 ```
 
+
+---
+
+## Upgrading from Previous Versions
+
+### Single → Multi-Project Development
+
+If your workbot has a `development/` folder with a single cloned repo (the old setup), the Dev tab will show a migration banner. Click **Convert** to automatically move it into the new multi-project structure (`development/{project-id}/`).
+
+### Old Docker Setup → Current
+
+Key changes if upgrading an existing Docker deployment:
+
+1. **Claude Code native installer** — Replace `npm install -g @anthropic-ai/claude-code` with `curl -fsSL https://claude.ai/install.sh | bash` (run as workbot user)
+2. **tmux** — Add `tmux` to the Dockerfile's apt-get install line (sessions survive disconnects)
+3. **Subagent Linux users** — The `subagents` group and user bootstrap in the entrypoint are required for subagent isolation
+4. **init: true** — Add to docker-compose.yml for proper signal handling (kill switch)
+5. **Port range 7700-7719** — Add to docker-compose ports for subagent web terminals
+6. **No cap_drop** — Remove `cap_drop: ALL` and `cap_add` sections (sudo/useradd need full caps)
+7. **Permission mode** — Use `--permission-mode bypassPermissions` 
+8. **Active key persistence** — The encryption key now persists across session timeouts (only deleted on explicit logout or container shutdown)
+9. **Multi-instance services** — Old single-key services auto-migrate to `{type}:default` instances on first load
+
+### Docker Files Reference
+
+The production Dockerfile, entrypoint.sh, and docker-compose.yml are maintained in the deployment directory (not in the repo). See the Installation section above for the current recommended versions.
+
+Key Dockerfile additions since initial release:
+- `tmux` for session persistence
+- `groupadd subagents` + `useradd` for agent isolation
+- Native Claude Code installer (not npm)
+- `ttyd` for web terminals
+- Oracle Instant Client (optional, for Oracle DB connections)
+
+---
+
+## License
+
+Private — Studio Llama

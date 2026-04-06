@@ -414,6 +414,7 @@ export class WorkflowEngine {
       const { service, method, url, body, headers: extraHeaders } = config.args as any;
       const svcConfig = SERVICES[service];
       if (!svcConfig) throw new Error(`Unknown service: ${service}`);
+      if (svcConfig.kind === "connection") throw new Error(`"${service}" is a connection service — use service_execute`);
 
       const store = loadStore();
       const saved = store[service];

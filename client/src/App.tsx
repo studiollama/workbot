@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { api } from "./api/client";
 import { ServicesProvider } from "./context/ServicesContext";
 import Dashboard from "./pages/Dashboard";
@@ -9,15 +9,20 @@ import SubagentDashboard from "./pages/SubagentDashboard";
 
 type AuthState = "loading" | "setup" | "login" | "authenticated";
 
+interface UserInfo {
+  role: "admin" | "subagent";
+  username: string;
+  subagentId?: string;
+}
+
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>("loading");
   const [hasEncryptedServices, setHasEncryptedServices] = useState(false);
+  const [user, setUser] = useState<UserInfo | null>(null);
 
   useEffect(() => {
     checkAuth();
-
-    // Listen for 401 events from the API client
-    const handler = () => setAuthState("login");
+    const handler = () => { setAuthState("login"); setUser(null); };
     window.addEventListener("workbot-auth-expired", handler);
     return () => window.removeEventListener("workbot-auth-expired", handler);
   }, []);
@@ -30,41 +35,48 @@ export default function App() {
         setAuthState("setup");
         return;
       }
-      const { authenticated } = await api.checkSession();
-      setAuthState(authenticated ? "authenticated" : "login");
-    } catch {
-      setAuthState("login");
-    }
+      const session = await api.checkSession();
+      if (session.authenticated && session.role) {
+        setUser({ role: session.role as "admin" | "subagent", username: session.username ?? "", subagentId: session.subagentId ?? undefined });
+        setAuthState("authenticated");
+      } else {
+        setAuthState("login");
+      }
+    } catch { setAuthState("login"); }
   }
 
+  function handleLogin(loginUser: UserInfo) { setUser(loginUser); setAuthState("authenticated"); }
+  function handleLogout() { setUser(null); setAuthState("login"); }
+
   if (authState === "loading") {
+    return <div className="min-h-screen flex items-center justify-center"><div className="w-6 h-6 border-2 border-surface-hover border-t-accent-600 rounded-full animate-spin" /></div>;
+  }
+  if (authState === "setup") {
+    return <SetupPage onSetup={() => { setUser({ role: "admin", username: "" }); setAuthState("authenticated"); }} hasEncryptedServices={hasEncryptedServices} />;
+  }
+  if (authState === "login") {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  // Subagent user: only their dashboard
+  if (user?.role === "subagent" && user.subagentId) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-gray-600 border-t-gray-200 rounded-full animate-spin" />
-      </div>
+      <Routes>
+        <Route path="/subagent/:id/:tab?" element={<SubagentDashboard onLogout={handleLogout} isSubagentUser />} />
+        <Route path="*" element={<Navigate to={`/subagent/${user.subagentId}`} replace />} />
+      </Routes>
     );
   }
 
-  if (authState === "setup") {
-    return <SetupPage onSetup={() => setAuthState("authenticated")} hasEncryptedServices={hasEncryptedServices} />;
-  }
-
-  if (authState === "login") {
-    return <LoginPage onLogin={() => setAuthState("authenticated")} />;
-  }
-
-  const handleLogout = () => setAuthState("login");
-
+  // Admin: full access with tab routes
   return (
     <Routes>
-      <Route path="/" element={
+      <Route path="/:tab?/*" element={
         <ServicesProvider>
           <Dashboard onLogout={handleLogout} />
         </ServicesProvider>
       } />
-      <Route path="/subagent/:id" element={
-        <SubagentDashboard onLogout={handleLogout} />
-      } />
+      <Route path="/subagent/:id/:tab?" element={<SubagentDashboard onLogout={handleLogout} />} />
     </Routes>
   );
 }

@@ -10,6 +10,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@openai/codex-sdk": "^0.114.0",
+    "basic-ftp": "^5.2.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -17,7 +18,11 @@
     "express-session": "^1.18.1",
     "node-cron": "^4.2.1",
     "openai": "^4.77.0",
-    "selfsigned": "^5.5.0"
+    "oracledb": "^6.10.0",
+    "pg": "^8.20.0",
+    "selfsigned": "^5.5.0",
+    "ssh2": "^1.17.0",
+    "telnet-client": "^2.2.13"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -25,6 +30,8 @@
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.1",
     "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.20.0",
+    "@types/ssh2": "^1.15.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

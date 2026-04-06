@@ -23,6 +23,7 @@ import dashboardAuthRoutes from "./routes/dashboard-auth.js";
 import logsRoutes from "./routes/logs.js";
 import workflowRoutes from "./routes/workflows.js";
 import subagentRoutes, { activeSessions } from "./routes/subagents.js";
+import brainRoutes from "./routes/brain.js";
 import { loadMcpConfig, saveMcpConfig } from "./mcp-config.js";
 import { ensureCerts } from "./certs.js";
 import { requireAuth } from "./middleware/requireAuth.js";
@@ -130,6 +131,7 @@ app.post("/api/workflows/:id/trigger/:webhookId", (req, res, next) => {
 });
 app.use("/api/workflows", requireAuth, workflowRoutes);
 app.use("/api/subagents", requireAuth, subagentRoutes);
+app.use("/api/brain", requireAuth, brainRoutes);
 
 // Kill switch — shuts down the container
 // PID 1 is bash with a SIGTERM trap that kills claude and exits cleanly
@@ -154,8 +156,8 @@ app.get("/api/internal/store", (req, res) => {
   res.json(store);
 });
 
-// NOTE: Active key is NOT deleted on startup — it persists across tsx watch restarts.
-// It's only deleted on explicit logout or container stop (SIGINT/SIGTERM).
+// Active key persists across restarts — only deleted on explicit logout
+// This keeps MCP service access alive even when the dashboard session expires
 
 // HTTPS server
 const { key, cert } = await ensureCerts();
@@ -185,6 +187,12 @@ setTimeout(() => {
   if (subs.length === 0) return;
   console.log(`[auto-spawn] Spawning ${subs.length} subagent(s)...`);
   for (const s of subs) {
+    // Skip if already running
+    const existing = activeSessions.get(s.id);
+    if (existing) {
+      try { process.kill(existing.pid, 0); console.log(`[auto-spawn] ${s.id} already running (PID ${existing.pid}), skipping`); continue; }
+      catch { activeSessions.delete(s.id); }
+    }
     const cwd = resolvePath(PROJECT_ROOT, "workbot-brain", "subagents", s.id);
     const args = ["remote-control", "--name", s.name, "--spawn", "same-dir", "--verbose"];
     args.push("--permission-mode", s.bypassPermissions ? "bypassPermissions" : "auto");
@@ -196,8 +204,10 @@ setTimeout(() => {
     const envStr = envArgs.map((e) => `export ${e}`).join(" && ");
     const claudeCmd = `${envStr} && cd ${cwd} && exec claude ${args.join(" ")}`;
     const linuxUser = getSubagentLinuxUser(s.id);
+    const tmuxSession = `sa-${s.id}`;
 
-    const proc = spawn("runuser", ["-u", linuxUser, "--", "script", "-qfc", claudeCmd, "/dev/null"], {
+    // Use tmux so session survives disconnects
+    const proc = spawn("runuser", ["-u", linuxUser, "--", "tmux", "new-session", "-d", "-s", tmuxSession, "-x", "200", "-y", "50", claudeCmd], {
       cwd, stdio: "ignore", detached: true,
     });
     proc.unref();
@@ -207,7 +217,7 @@ setTimeout(() => {
   }
 }, 15_000);
 
-// Clean up active key on shutdown
+// Clean up on shutdown — delete active key so services require re-login after restart
 function cleanup() {
   workflowEngine.stop();
   deleteActiveKey();

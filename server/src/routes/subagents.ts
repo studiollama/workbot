@@ -70,10 +70,10 @@ router.get("/:id", (req, res) => {
 
 // POST /api/subagents
 router.post("/", (req, res) => {
-  const { name, description, allowedServices, claudeAuth, systemPromptPath } = req.body;
+  const { name, description, allowedServices, claudeAuth, commonReadOnly, systemPromptPath } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
   try {
-    const s = createSubagent({ name, description, allowedServices, claudeAuth, systemPromptPath });
+    const s = createSubagent({ name, description, allowedServices, claudeAuth, commonReadOnly, systemPromptPath });
     res.status(201).json(s);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -152,7 +152,10 @@ router.post("/auto-spawn", (_req, res) => {
       const envStr = envArgs.map((e) => `export ${e}`).join(" && ");
       const claudeCmd = `${envStr} && cd ${cwd} && exec claude ${args.join(" ")}`;
 
-      const proc = spawn("runuser", ["-u", linuxUser, "--", "script", "-qfc", claudeCmd, "/dev/null"], {
+      const tmuxSession = `sa-${s.id}`;
+      // Kill any existing tmux session for this subagent first
+      try { require("child_process").execFileSync("runuser", ["-u", linuxUser, "--", "tmux", "kill-session", "-t", tmuxSession], { stdio: "pipe" }); } catch {}
+      const proc = spawn("runuser", ["-u", linuxUser, "--", "tmux", "new-session", "-d", "-s", tmuxSession, "-x", "200", "-y", "50", claudeCmd], {
         cwd, stdio: "ignore", detached: true,
       });
       proc.unref();
@@ -240,11 +243,15 @@ router.post("/:id/spawn", (req, res) => {
   if (spawnEnv.HOME) envArgs.push(`HOME=${spawnEnv.HOME}`);
   envArgs.push(`PATH=${spawnEnv.PATH || "/home/workbot/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}`);
 
-  // Use `script` to allocate a PTY — remote-control child sessions need one
+  // Use tmux so session survives disconnects and provides a PTY
   const envStr = envArgs.map((e) => `export ${e}`).join(" && ");
   const claudeCmd = `${envStr} && cd ${cwd} && exec claude ${args.join(" ")}`;
+  const tmuxSession = `sa-${s.id}`;
 
-  const proc = spawn("runuser", ["-u", linuxUser, "--", "script", "-qfc", claudeCmd, "/dev/null"], {
+  // Kill any existing tmux session for this subagent first
+  try { require("child_process").execFileSync("runuser", ["-u", linuxUser, "--", "tmux", "kill-session", "-t", tmuxSession], { stdio: "pipe" }); } catch {}
+
+  const proc = spawn("runuser", ["-u", linuxUser, "--", "tmux", "new-session", "-d", "-s", tmuxSession, "-x", "200", "-y", "50", claudeCmd], {
     cwd,
     stdio: "ignore",
     detached: true,

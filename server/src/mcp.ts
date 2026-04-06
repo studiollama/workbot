@@ -15,6 +15,16 @@ import { loadMcpConfig } from "./mcp-config.js";
 import { logToolCall } from "./mcp-logger.js";
 import { readActiveKey, isStoreEncrypted } from "./crypto.js";
 import {
+  ensureCommonBrainDir,
+  getCommonBrain,
+  commonGitCommit,
+  commonGitLog,
+  COMMON_BRAIN_ROOT,
+  COMMON_QMD_INDEX,
+  validateCommonPath,
+  readCommonContext,
+} from "./common-brain-utils.js";
+import {
   BRAIN_ROOT,
   getAllNotes,
   loadNote,
@@ -75,9 +85,8 @@ if (SUBAGENT_ID) console.error(`[mcp] Subagent mode: ${SUBAGENT_ID}, argv: ${pro
 // Security: non-root users MUST use --subagent flag to prevent privilege escalation
 import { userInfo } from "os";
 const currentUser = userInfo();
-// Allow root and the main workbot user to run host MCP. Block subagent users (sa-*).
-if (!SUBAGENT_ID && currentUser.uid !== 0 && currentUser.username.startsWith("sa-")) {
-  console.error("[mcp] FATAL: Subagent users must specify --subagent <id>. Refusing to start in host mode.");
+if (!SUBAGENT_ID && currentUser.uid !== 0) {
+  console.error("[mcp] FATAL: Non-root users must specify --subagent <id>. Refusing to start in host mode.");
   process.exit(1);
 }
 // Security: validate that --subagent ID matches the running Linux user (sa-{id})
@@ -104,6 +113,10 @@ const scopedValidateNote = scopedBrain ? scopedBrain.validateNote : validateNote
 const scopedWriteNote = scopedBrain ? scopedBrain.writeNote : writeNote;
 const scopedBuildLinkGraph = scopedBrain ? scopedBrain.buildLinkGraph : buildLinkGraph;
 
+// ── Common knowledge brain (shared across all agents) ─────────────────
+ensureCommonBrainDir();
+const commonBrain = getCommonBrain();
+
 const serverName = SUBAGENT_ID ? `workbot-subagent-${SUBAGENT_ID}` : "workbot";
 
 const server = new McpServer({
@@ -122,14 +135,16 @@ function loggedTool(
   schema: Record<string, z.ZodTypeAny>,
   handler: (args: any) => Promise<any>
 ) {
+  // Prefix tool name with subagent ID for log filtering
+  const logName = SUBAGENT_ID ? `${SUBAGENT_ID}/${name}` : name;
   server.tool(name, description, schema, async (args: any) => {
     const start = Date.now();
     try {
       const result = await handler(args);
-      logToolCall(name, args, Date.now() - start);
+      logToolCall(logName, args, Date.now() - start);
       return result;
     } catch (err) {
-      logToolCall(name, args, Date.now() - start);
+      logToolCall(logName, args, Date.now() - start);
       throw err;
     }
   });
@@ -535,11 +550,258 @@ loggedTool(
   }
 );
 
+// ── Common knowledge tools (available to host + subagents) ────────────
+
+let commonContextInjected = false;
+
+/** Append common brain context guide on first use per session */
+function maybeInjectCommonContext(text: string): string {
+  if (commonContextInjected) return text;
+  commonContextInjected = true;
+  const ctx = readCommonContext();
+  if (!ctx) return text;
+  return text + `\n\n--- Common Knowledge Guide (first use this session) ---\n${ctx}\n--- End Guide ---`;
+}
+
+async function runCommonQmd(args: string[]): Promise<string> {
+  if (!mcpConfig.qmdCliPath) {
+    return "QMD not configured. Set the QMD CLI path in the workbot dashboard (MCP tab).";
+  }
+  try {
+    const nodePath = mcpConfig.qmdCliPath ? mcpConfig.nodePath.replace(/\\/g, "/") : "node";
+    const qmdPath = mcpConfig.qmdCliPath!.replace(/\\/g, "/");
+    const { stdout, stderr } = await execFileAsync(
+      nodePath,
+      [qmdPath, "--index", COMMON_QMD_INDEX, ...args],
+      {
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, HOME: process.env.USERPROFILE ?? process.env.HOME },
+      }
+    );
+    return (stdout + stderr).trim();
+  } catch (err: any) {
+    const out = ((err.stdout ?? "") + (err.stderr ?? "")).trim();
+    if (out) return out;
+    return `Error: ${err.message}`;
+  }
+}
+
+loggedTool(
+  "common_search",
+  "BM25 keyword search on the common knowledge brain (shared across all agents). Fast, use first.",
+  { query: z.string().describe("Search keywords") },
+  async ({ query }) => ({
+    content: [{ type: "text", text: maybeInjectCommonContext(await runCommonQmd(["search", query])) }],
+  })
+);
+
+loggedTool(
+  "common_vsearch",
+  "Vector semantic search on common knowledge. Slower (~5s) but finds conceptual matches.",
+  { query: z.string().describe("Natural language question or concept") },
+  async ({ query }) => ({
+    content: [{ type: "text", text: maybeInjectCommonContext(await runCommonQmd(["vsearch", query])) }],
+  })
+);
+
+loggedTool(
+  "common_get",
+  "Retrieve a specific note from common knowledge by path.",
+  { path: z.string().describe("Note path relative to common brain root, e.g. knowledge/entities/aws/ec2/vm-orcl-11g.md") },
+  async ({ path }) => ({
+    content: [{ type: "text", text: maybeInjectCommonContext(await runCommonQmd(["get", path])) }],
+  })
+);
+
+loggedTool(
+  "common_write",
+  "Create or update a note in common knowledge (shared brain). Validates frontmatter. Call common_commit when done with changes.",
+  {
+    path: z.string().describe("Note path relative to common brain root, e.g. knowledge/entities/my-note.md"),
+    content: z.string().describe("Full markdown content including YAML frontmatter"),
+    force: z.boolean().optional().describe("Skip validation warnings. Default false."),
+  },
+  async ({ path, content, force }) => {
+    const pathErr = validateCommonPath(path);
+    if (pathErr) {
+      return { content: [{ type: "text", text: `Invalid path: ${pathErr}` }], isError: true };
+    }
+
+    const validation = commonBrain.validateNote(content);
+    if (!validation.valid && !force) {
+      return {
+        content: [{
+          type: "text",
+          text: `Validation failed — fix these issues or set force=true:\n${validation.warnings.map((w) => `  - ${w}`).join("\n")}`,
+        }],
+        isError: true,
+      };
+    }
+
+    commonBrain.writeNote(path, content);
+
+    let warnings = "";
+    if (validation.warnings.length > 0) {
+      warnings = `\n\nWarnings (written anyway due to force=true):\n${validation.warnings.map((w) => `  - ${w}`).join("\n")}`;
+    }
+
+    let indexResult = "";
+    try { indexResult = await runCommonQmd(["update"]); } catch { indexResult = "(index skipped)"; }
+
+    return {
+      content: [{
+        type: "text",
+        text: maybeInjectCommonContext(`Written to common: ${path} (${content.length} chars)${warnings}\n\nIndex: ${indexResult}\n\n💡 Call common_commit when you're done with changes to save them to git.`),
+      }],
+    };
+  }
+);
+
+loggedTool(
+  "common_list",
+  "List notes in common knowledge filtered by folder, tag, or status.",
+  {
+    folder: z.string().optional().describe("Filter to notes in this folder, e.g. 'knowledge/entities'"),
+    tag: z.string().optional().describe("Filter to notes with this tag, e.g. 'entity', 'status/active'"),
+    limit: z.number().optional().describe("Max results. Default 50."),
+  },
+  async ({ folder, tag, limit }) => {
+    const maxResults = limit ?? 50;
+    const allPaths = commonBrain.getAllNotes();
+    const results: string[] = [];
+
+    for (const p of allPaths) {
+      if (results.length >= maxResults) break;
+      if (folder && !p.startsWith(folder)) continue;
+      if (tag) {
+        const note = commonBrain.loadNote(p);
+        if (!note || !note.tags.some((t) => t === tag || t.startsWith(tag + "/"))) continue;
+      }
+      const note = commonBrain.loadNote(p);
+      const title = note?.title ?? p;
+      const tags = note?.tags.length ? ` [${note.tags.join(", ")}]` : "";
+      results.push(`${p}  —  ${title}${tags}`);
+    }
+
+    if (results.length === 0) {
+      return {
+        content: [{ type: "text", text: maybeInjectCommonContext(`No common knowledge notes found${folder ? ` in ${folder}` : ""}${tag ? ` with tag '${tag}'` : ""}.`) }],
+      };
+    }
+    return {
+      content: [{ type: "text", text: maybeInjectCommonContext(`Found ${results.length} common note${results.length > 1 ? "s" : ""}:\n\n${results.join("\n")}`) }],
+    };
+  }
+);
+
+loggedTool(
+  "common_commit",
+  "Git commit all pending changes in the common knowledge brain. Identifies the committing agent. Call after common_write.",
+  {
+    message: z.string().describe("Commit message describing the changes"),
+  },
+  async ({ message }) => {
+    let authorName: string;
+    let authorEmail: string;
+
+    if (SUBAGENT_ID) {
+      const sa = getSubagentById(SUBAGENT_ID);
+      authorName = sa?.name ?? SUBAGENT_ID;
+      authorEmail = `sa-${SUBAGENT_ID}@workbot`;
+    } else {
+      authorName = "Workbot Host";
+      authorEmail = "host@workbot";
+    }
+
+    try {
+      const result = await commonGitCommit(message, authorName, authorEmail);
+      if (result === "nothing to commit") {
+        return { content: [{ type: "text", text: maybeInjectCommonContext("Nothing to commit — common knowledge is up to date.") }] };
+      }
+      const log = await commonGitLog(5);
+      return { content: [{ type: "text", text: maybeInjectCommonContext(`Committed: ${result}\nAuthor: ${authorName} <${authorEmail}>\n\nRecent commits:\n${log}`) }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Commit failed: ${err.message}` }], isError: true };
+    }
+  }
+);
+
 // ── Host-only tools (hidden from subagents) ─────────────────────────────
 // Agents, workflows, and subagent management tools are only available
 // when running as the host workbot (no --subagent flag).
 
 if (!SUBAGENT_ID) {
+
+// ── common_move (host-only) ─────────────────────────────────────────────
+
+loggedTool(
+  "common_move",
+  "Move a note from the private host brain to common knowledge. Leaves a redirect in the private brain. Auto-commits to common git.",
+  {
+    path: z.string().describe("Note path in the private brain, e.g. knowledge/entities/aws/ec2/vm-orcl-11g/cdpd/cdpd-schema-overview.md"),
+    common_path: z.string().optional().describe("Destination path in common brain. Defaults to same path."),
+    message: z.string().optional().describe("Git commit message. Defaults to 'Move {path} to common knowledge'."),
+  },
+  async ({ path, common_path, message }) => {
+    const destPath = common_path ?? path;
+
+    const pathErr = validateCommonPath(destPath);
+    if (pathErr) {
+      return { content: [{ type: "text", text: `Invalid destination path: ${pathErr}` }], isError: true };
+    }
+
+    // Read from private brain
+    const note = scopedLoadNote(path);
+    if (!note) {
+      return { content: [{ type: "text", text: `Note not found in private brain: ${path}` }], isError: true };
+    }
+
+    // Write to common brain
+    commonBrain.writeNote(destPath, note.content);
+
+    // Write redirect note in private brain
+    const redirect = `---
+tags:
+  - context
+  - status/archived
+moved_to: common/${destPath}
+---
+
+# Moved to Common Knowledge
+
+This note has been moved to the common knowledge brain at \`${destPath}\`.
+
+Use \`common_get\` to read it: \`common_get("${destPath}")\`
+
+## Related
+
+${note.content.match(/## Related[\s\S]*$/)?.[0]?.replace("## Related", "").trim() || ""}
+`;
+    scopedWriteNote(path, redirect);
+
+    // Auto-commit
+    const commitMsg = message ?? `Move ${path} to common knowledge`;
+    try {
+      const hash = await commonGitCommit(commitMsg, "Workbot Host", "host@workbot");
+      let indexResult = "";
+      try { indexResult = await runCommonQmd(["update"]); } catch { indexResult = "(index skipped)"; }
+      return {
+        content: [{
+          type: "text",
+          text: `Moved to common knowledge:\n  From: ${path}\n  To: common/${destPath}\n  Commit: ${hash}\n  Private brain: redirect note written\n\nIndex: ${indexResult}`,
+        }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{
+          type: "text",
+          text: `Note written to common but commit failed: ${err.message}\nCall common_commit manually.`,
+        }],
+      };
+    }
+  }
+);
 
 // ── Agents context tools ────────────────────────────────────────────────
 
@@ -670,7 +932,7 @@ loggedTool(
   "service_context_set",
   "Link a brain note to a service as persistent context. The note's content will be included whenever service_request is called for that service. Use this for things like signature preferences, formatting rules, or persona instructions.",
   {
-    service: z.string().describe("Service key (e.g. 'gmail', 'github')"),
+    service: z.string().describe("Service key (e.g. 'outlook', 'github')"),
     path: z.string().describe("Brain note path to link (e.g. 'knowledge/entities/email-signature.md')"),
   },
   async ({ service, path }) => {
@@ -738,14 +1000,16 @@ loggedTool(
       if (allowedList && !isServiceAllowed(key, allowedList)) continue;
       seenTypes.add(serviceType);
       const name = saved._instanceName || SERVICES[serviceType].name;
-      lines.push(`${name} (${key}): connected — ${saved.user}`);
+      const kind = SERVICES[serviceType].kind === "connection" ? " [connection]" : "";
+      lines.push(`${name} (${key}): connected${kind} — ${saved.user}`);
     }
 
     // Show disconnected types (host mode only)
     if (!SUBAGENT_ID) {
       for (const [key, config] of Object.entries(SERVICES)) {
         if (!seenTypes.has(key)) {
-          lines.push(`${config.name} (${key}): disconnected`);
+          const kind = config.kind === "connection" ? " [connection]" : "";
+          lines.push(`${config.name} (${key}): disconnected${kind}`);
         }
       }
     }
@@ -803,6 +1067,13 @@ loggedTool(
     if (!config) {
       return {
         content: [{ type: "text", text: `Unknown service type: ${serviceType}. Use service_status to see available keys.` }],
+        isError: true,
+      };
+    }
+
+    if (config.kind === "connection") {
+      return {
+        content: [{ type: "text", text: `"${serviceType}" is a connection service (${config.protocol}) — use service_execute instead of service_request.` }],
         isError: true,
       };
     }
@@ -879,6 +1150,98 @@ loggedTool(
     }
   }
 );
+
+// ── Connection service execution ──────────────────────────────────────
+
+loggedTool(
+  "service_execute",
+  "Execute a command or query against a connection-based service (database, SSH, SFTP, FTP, Telnet). Use service_status to see available connection services.",
+  {
+    service: z
+      .string()
+      .describe(
+        "Service instance key (e.g. 'postgresql:prod-db', 'ssh:web-server'). Use service_status to see available keys."
+      ),
+    command: z
+      .string()
+      .describe(
+        "The command or query to execute. For databases: SQL query. For SSH: shell command. For SFTP/FTP: command like 'ls /path' or 'get /remote/file'. For Telnet: raw command."
+      ),
+  },
+  async ({ service, command }) => {
+    if (!SUBAGENT_ID && isStoreEncrypted() && !readActiveKey()) {
+      return {
+        content: [{ type: "text", text: "Dashboard session required — log into the workbot dashboard to unlock service credentials." }],
+        isError: true,
+      };
+    }
+
+    const { serviceType } = parseInstanceId(service);
+
+    // Subagent mode: reject requests to services not in the allowed list
+    if (SUBAGENT_ID) {
+      const sa = getSubagentById(SUBAGENT_ID);
+      const allowed = sa?.allowedServices ?? [];
+      if (!isServiceAllowed(service, allowed)) {
+        return {
+          content: [{ type: "text", text: `Service "${service}" is not allowed for this subagent. Allowed: ${allowed.join(", ") || "none"}` }],
+          isError: true,
+        };
+      }
+    }
+
+    const config = SERVICES[serviceType];
+    if (!config) {
+      return {
+        content: [{ type: "text", text: `Unknown service type: ${serviceType}. Use service_status to see available keys.` }],
+        isError: true,
+      };
+    }
+
+    if (config.kind !== "connection") {
+      return {
+        content: [{ type: "text", text: `"${serviceType}" is a REST API service — use service_request instead of service_execute.` }],
+        isError: true,
+      };
+    }
+
+    const store = await loadStoreSecure();
+    const saved = store[service] ?? (service === serviceType ? undefined : store[serviceType]);
+    if (!saved) {
+      return {
+        content: [{ type: "text", text: `Service "${service}" is not connected. Connect it via the dashboard first.` }],
+        isError: true,
+      };
+    }
+
+    try {
+      const allParams: Record<string, string> = { ...saved.extras, password: saved.token };
+      const result = await config.execute(allParams, command);
+
+      // Include linked service context once per session per service
+      let contextBlock = "";
+      if (!contextDelivered.has(service)) {
+        const context = resolveServiceContext(service);
+        if (context) {
+          contextBlock = `\n\n--- Service Context (first use) ---\n${context}\n--- End Context ---`;
+          contextDelivered.add(service);
+        }
+      }
+
+      return {
+        content: [{ type: "text", text: result + contextBlock }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: "text", text: `Execution failed: ${err.message}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Also update service_request to reject connection services with helpful message
+// (handled inline — connection services lack authHeader/validateUrl so would error anyway)
 
 // ── Workflow tools (available to both host and subagents) ─────────────
 // Subagents get their own scoped workflows via the scope parameter.
@@ -1091,7 +1454,7 @@ loggedTool(
   {
     name: z.string().describe("Subagent name (e.g. 'Email Handler')"),
     description: z.string().optional().describe("What this subagent does"),
-    allowedServices: z.string().optional().describe("JSON array of service keys this subagent can access, e.g. '[\"gmail\",\"github\"]'"),
+    allowedServices: z.string().optional().describe("JSON array of service keys this subagent can access, e.g. '[\"outlook\",\"github\"]'"),
   },
   async ({ name, description, allowedServices: servicesJson }) => {
     try {

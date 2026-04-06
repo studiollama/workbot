@@ -129,11 +129,11 @@ export default function SkillsPanel() {
       )}
 
       {/* Header row */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <p className="text-xs text-theme-muted">
           Manage Claude Code skills. Toggle skills on/off to include them in your workflow.
         </p>
-        <div className="flex items-center gap-2 shrink-0 ml-4">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setShowAdd(!showAdd)}
             className="text-sm text-accent-400 hover:text-accent-300 transition whitespace-nowrap"
@@ -159,7 +159,7 @@ export default function SkillsPanel() {
 
       {/* Add skill form */}
       {showAdd && (
-        <form onSubmit={handleAdd} className="bg-surface-card rounded-xl p-4 space-y-3 overflow-y-auto max-h-[60vh]">
+        <form onSubmit={handleAdd} className="glass-card p-4 space-y-3 overflow-y-auto max-h-[60vh]">
           <p className="text-sm font-medium">Add Skill from GitHub</p>
           <input
             type="text"
@@ -255,7 +255,7 @@ function SkillCard({
   const risk = RISK_STYLES[skill.risk] ?? RISK_STYLES.unknown;
 
   return (
-    <div className="bg-surface-card rounded-xl p-5 space-y-3">
+    <div className="glass-card p-3 sm:p-5 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

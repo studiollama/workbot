@@ -28,17 +28,35 @@ export interface ServiceStatus {
   connected: boolean;
   user?: string;
   extras?: Record<string, string>;
+  serviceType?: string;
+  instanceName?: string;
+}
+
+export interface ConnectionField {
+  key: string;
+  label: string;
+  placeholder: string;
+  type: "text" | "password" | "textarea" | "number";
+  required?: boolean;
+  defaultValue?: string;
 }
 
 export interface ServiceConfig {
   name: string;
-  tokenUrl: string;
-  tokenPrefix: string;
+  kind?: "rest" | "connection";
+  // REST fields
+  tokenUrl?: string;
+  tokenPrefix?: string;
   extraFields?: { key: string; label: string; placeholder: string }[];
   tokenLabel?: string;
   authNote?: string;
   difficulty?: string;
   oauth?: { scopes: string[]; redirectPath: string };
+  // Connection fields
+  connectionFields?: ConnectionField[];
+  protocol?: string;
+  defaultPort?: number;
+  docsUrl?: string;
 }
 
 export interface DashboardConfig {
@@ -90,16 +108,31 @@ export interface McpStatus {
 
 // --- Development types ---
 
-export interface DevStatus {
-  repoUrl: string | null;
-  owner: string | null;
-  repo: string | null;
+export interface DevProject {
+  id: string;
+  name: string;
+  repoUrl: string;
+  owner: string;
+  repo: string;
   cloneStatus: "idle" | "cloning" | "cloned" | "error";
   cloneError: string | null;
   lastClonedAt: string | null;
-  analysisStatus: "idle" | "running" | "done" | "error";
-  analysisError: string | null;
+  createdAt: string;
+}
+
+export interface DevStatus {
+  projects: DevProject[];
   githubConnected: boolean;
+  needsMigration?: boolean;
+  // Legacy compat
+  repoUrl?: string | null;
+  owner?: string | null;
+  repo?: string | null;
+  cloneStatus?: string;
+  cloneError?: string | null;
+  lastClonedAt?: string | null;
+  analysisStatus?: string;
+  analysisError?: string | null;
 }
 
 export interface GitCommit {
@@ -225,24 +258,31 @@ export const api = {
   // Development
   getDevStatus: () => request<DevStatus>("/dev/status"),
 
-  setDevRepo: (repoUrl: string) =>
-    request<{ ok: boolean }>("/dev/repo", {
-      method: "POST",
-      body: JSON.stringify({ repoUrl }),
-    }),
+  // Development migration + multi-project API
+  migrateDevFolder: () =>
+    request<{ ok: boolean; project?: any; message?: string }>("/dev/migrate", { method: "POST" }),
+  addDevProject: (repoUrl: string, name?: string) =>
+    request<DevProject>("/dev/projects", { method: "POST", body: JSON.stringify({ repoUrl, name }) }),
+  removeDevProject: (id: string) =>
+    request<{ ok: boolean }>(`/dev/projects/${id}`, { method: "DELETE" }),
+  cloneDevProject: (id: string) =>
+    request<{ ok: boolean }>(`/dev/projects/${id}/clone`, { method: "POST" }),
+  getProjectCommits: (id: string) => request<GitCommit[]>(`/dev/projects/${id}/commits`),
+  getProjectIssues: (id: string) => request<GitIssue[]>(`/dev/projects/${id}/issues`),
+  getProjectPulls: (id: string) => request<GitPR[]>(`/dev/projects/${id}/pulls`),
+  getProjectEnvFiles: (id: string, reveal?: boolean) =>
+    request<EnvFile[]>(`/dev/projects/${id}/env${reveal ? "?reveal=true" : ""}`),
 
+  // Legacy single-repo compat
+  setDevRepo: (repoUrl: string) =>
+    request<{ ok: boolean }>("/dev/repo", { method: "POST", body: JSON.stringify({ repoUrl }) }),
   removeDevRepo: () =>
     request<{ ok: boolean }>("/dev/repo", { method: "DELETE" }),
-
   startClone: () =>
     request<{ ok: boolean }>("/dev/clone", { method: "POST" }),
-
   getDevCommits: () => request<GitCommit[]>("/dev/commits"),
-
   getDevIssues: () => request<GitIssue[]>("/dev/issues"),
-
   getDevPulls: () => request<GitPR[]>("/dev/pulls"),
-
   getDevEnvFiles: (reveal?: boolean) =>
     request<EnvFile[]>(`/dev/env${reveal ? "?reveal=true" : ""}`),
 
@@ -287,22 +327,35 @@ export const api = {
     request<{ setupComplete: boolean; hasEncryptedServices: boolean }>("/dashboard-auth/setup-status"),
 
   checkSession: () =>
-    request<{ authenticated: boolean; username: string | null }>("/dashboard-auth/session"),
+    request<{ authenticated: boolean; username: string | null; role: string | null; subagentId: string | null }>("/dashboard-auth/session"),
 
   setup: (username: string, password: string, oldPassword?: string) =>
-    request<{ ok: boolean; username: string }>("/dashboard-auth/setup", {
+    request<{ ok: boolean; username: string; role: string }>("/dashboard-auth/setup", {
       method: "POST",
       body: JSON.stringify({ username, password, ...(oldPassword ? { oldPassword } : {}) }),
     }),
 
   login: (username: string, password: string) =>
-    request<{ ok: boolean; username: string }>("/dashboard-auth/login", {
+    request<{ ok: boolean; username: string; role: string; subagentId: string | null }>("/dashboard-auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
 
   dashboardLogout: () =>
     request<{ ok: boolean }>("/dashboard-auth/logout", { method: "POST" }),
+
+  // User management (admin only)
+  listUsers: () =>
+    request<{ username: string; subagentId: string }[]>("/dashboard-auth/users"),
+
+  createUser: (username: string, password: string, subagentId: string, keyHolder?: boolean) =>
+    request<{ ok: boolean }>("/dashboard-auth/users", {
+      method: "POST",
+      body: JSON.stringify({ username, password, subagentId, keyHolder: !!keyHolder }),
+    }),
+
+  deleteUser: (username: string) =>
+    request<{ ok: boolean }>(`/dashboard-auth/users/${encodeURIComponent(username)}`, { method: "DELETE" }),
 
   shutdown: () =>
     request<{ ok: boolean }>("/shutdown", { method: "POST" }),
@@ -378,4 +431,81 @@ export const api = {
     const base = params?.scope ? `/subagents/${params.scope}/logs` : "/logs/mcp";
     return request<{ entries: any[]; total: number }>(`${base}${qs ? `?${qs}` : ""}`);
   },
+
+  // Brain
+  getBrains: () => request<BrainInfo[]>("/brain/brains"),
+  getBrainNotes: (scope?: string) =>
+    request<BrainNoteMeta[]>(`/brain/notes${scope ? `?scope=${scope}` : ""}`),
+  getBrainNote: (path: string, scope?: string) =>
+    request<BrainNote>(`/brain/notes/${path}${scope ? `?scope=${scope}` : ""}`),
+  getBrainGraph: (scope?: string) =>
+    request<BrainGraphData>(`/brain/graph${scope ? `?scope=${scope}` : ""}`),
+  searchBrain: (q: string, scope?: string) =>
+    request<BrainSearchResult[]>(`/brain/search?q=${encodeURIComponent(q)}${scope ? `&scope=${scope}` : ""}`),
+  getBrainTree: (scope?: string) =>
+    request<BrainTreeNode[]>(`/brain/tree${scope ? `?scope=${scope}` : ""}`),
+  createBrainNote: (path: string, content: string, scope?: string, force?: boolean) =>
+    request<{ ok: boolean; path: string; warnings: string[] }>("/brain/notes", {
+      method: "POST",
+      body: JSON.stringify({ path, content, scope, force }),
+    }),
+  updateBrainNote: (path: string, content: string, scope?: string, force?: boolean) =>
+    request<{ ok: boolean; path: string; warnings: string[] }>(`/brain/notes/${path}`, {
+      method: "PUT",
+      body: JSON.stringify({ content, scope, force }),
+    }),
+  deleteBrainNote: (path: string, scope?: string) =>
+    request<{ ok: boolean }>(`/brain/notes/${path}${scope ? `?scope=${scope}` : ""}`, { method: "DELETE" }),
 };
+
+// --- Brain types ---
+
+export interface BrainInfo {
+  id: string;
+  label: string;
+}
+
+export interface BrainNoteMeta {
+  path: string;
+  title: string;
+  tags: string[];
+  aliases: string[];
+  mtime: string | null;
+}
+
+export interface BrainNote extends BrainNoteMeta {
+  content: string;
+  frontmatter: Record<string, unknown>;
+  outgoing: string[];
+  incoming: string[];
+}
+
+export interface BrainGraphNode {
+  id: string;
+  title: string;
+  tags: string[];
+  connections: number;
+}
+
+export interface BrainGraphLink {
+  source: string;
+  target: string;
+}
+
+export interface BrainGraphData {
+  nodes: BrainGraphNode[];
+  links: BrainGraphLink[];
+  titleToPath: Record<string, string>;
+}
+
+export interface BrainSearchResult extends BrainNoteMeta {
+  snippet: string;
+}
+
+export interface BrainTreeNode {
+  name: string;
+  path: string;
+  type: "folder" | "file";
+  tags?: string[];
+  children?: BrainTreeNode[];
+}

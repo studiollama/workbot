@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api/client";
 
+interface SubagentInfo { id: string; name: string; }
+
 interface LogEntry {
   timestamp: string;
   tool: string;
@@ -8,11 +10,21 @@ interface LogEntry {
   duration_ms?: number;
 }
 
-export default function LogsPanel({ scope }: { scope?: string } = {}) {
+export default function LogsPanel({ scope: fixedScope }: { scope?: string } = {}) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<string>(""); // "" = all, subagentId = that agent
+  const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
+  const scope = fixedScope || scopeFilter || undefined;
+
+  // Fetch subagent list for the dropdown (only when not locked to a scope)
+  useEffect(() => {
+    if (!fixedScope) {
+      api.getSubagents().then((subs) => setSubagents(subs.map((s: any) => ({ id: s.id, name: s.name })))).catch(() => {});
+    }
+  }, [fixedScope]);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [toolFilter, setToolFilter] = useState("");
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -34,7 +46,7 @@ export default function LogsPanel({ scope }: { scope?: string } = {}) {
     } finally {
       setLoading(false);
     }
-  }, [toolFilter]);
+  }, [toolFilter, scopeFilter, fixedScope]);
 
   // Load older entries (append)
   const fetchMore = useCallback(async () => {
@@ -135,12 +147,25 @@ export default function LogsPanel({ scope }: { scope?: string } = {}) {
   return (
     <div className="space-y-4">
       {/* Header controls */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold">MCP Tool Logs</h2>
+          <h2 className="text-base sm:text-lg font-semibold">MCP Tool Logs</h2>
           <span className="text-xs text-theme-muted">{total} total</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {/* Scope filter (only on main dashboard, not subagent pages) */}
+          {!fixedScope && subagents.length > 0 && (
+            <select
+              value={scopeFilter}
+              onChange={(e) => setScopeFilter(e.target.value)}
+              className="px-2 py-1 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none"
+            >
+              <option value="">All agents</option>
+              {subagents.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
           <select
             value={toolFilter}
             onChange={(e) => setToolFilter(e.target.value)}
@@ -173,8 +198,8 @@ export default function LogsPanel({ scope }: { scope?: string } = {}) {
           No MCP tool calls logged yet. Use MCP tools to see activity here.
         </div>
       ) : (
-        <div className="border border-theme rounded-lg overflow-hidden">
-          <table className="w-full text-xs">
+        <div className="border border-theme rounded-lg overflow-x-auto">
+          <table className="w-full text-xs min-w-[600px]">
             <thead>
               <tr className="bg-surface-card text-theme-secondary border-b border-theme">
                 <th className="text-left px-3 py-2 font-medium">Time</th>

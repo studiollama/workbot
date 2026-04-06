@@ -100,7 +100,7 @@ export default function WorkflowRunView({ workflowId, runId, scope, onBack }: Pr
       </div>
 
       {/* DAG */}
-      <div className="bg-surface-card rounded-xl p-4">
+      <div className="glass-card p-4">
         <WorkflowDagView
           nodes={workflow.nodes}
           edges={workflow.edges}
@@ -112,7 +112,7 @@ export default function WorkflowRunView({ workflowId, runId, scope, onBack }: Pr
 
       {/* Selected node detail */}
       {selectedResult && (
-        <div className="bg-surface-card rounded-xl p-4 space-y-2">
+        <div className="glass-card p-4 space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-medium font-mono">{selectedResult.nodeId}</h3>

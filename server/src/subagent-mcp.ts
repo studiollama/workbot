@@ -16,6 +16,15 @@ import { loadMcpConfig } from "./mcp-config.js";
 import { logToolCall } from "./mcp-logger.js";
 import { readActiveKey, isStoreEncrypted } from "./crypto.js";
 import { createScopedBrainUtils } from "./subagent-brain-utils.js";
+import {
+  ensureCommonBrainDir,
+  getCommonBrain,
+  commonGitCommit,
+  commonGitLog,
+  COMMON_QMD_INDEX,
+  validateCommonPath,
+  readCommonContext,
+} from "./common-brain-utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -210,6 +219,9 @@ export async function createSubagentMcpServer(subagentId: string): Promise<void>
     if (!saved) return { content: [{ type: "text", text: `Service "${config.name}" is not connected on the host.` }], isError: true };
 
     try {
+      if (config.kind === "connection") {
+        return { content: [{ type: "text", text: `"${config.name}" is a connection service — use service_execute instead.` }], isError: true };
+      }
       let token = saved.token;
       if (config.preConnect && saved.extras) {
         token = (await config.preConnect(saved.token, saved.extras)).resolvedToken;
@@ -227,6 +239,116 @@ export async function createSubagentMcpServer(subagentId: string): Promise<void>
       return { content: [{ type: "text", text: `Request failed: ${err.message}` }], isError: true };
     }
   });
+
+  // ── Common knowledge tools (shared brain) ───────────────────────────
+
+  ensureCommonBrainDir();
+  const commonBrain = getCommonBrain();
+
+  let commonContextInjected = false;
+  function maybeInjectCommonContext(text: string): string {
+    if (commonContextInjected) return text;
+    commonContextInjected = true;
+    const ctx = readCommonContext();
+    if (!ctx) return text;
+    return text + `\n\n--- Common Knowledge Guide (first use this session) ---\n${ctx}\n--- End Guide ---`;
+  }
+
+  async function runCommonQmd(args: string[]): Promise<string> {
+    if (!mcpConfig.qmdCliPath) return "QMD not configured.";
+    try {
+      const nodePath = mcpConfig.nodePath.replace(/\\/g, "/");
+      const qmdPath = mcpConfig.qmdCliPath!.replace(/\\/g, "/");
+      const { stdout, stderr } = await execFileAsync(
+        nodePath,
+        [qmdPath, "--index", COMMON_QMD_INDEX, ...args],
+        { timeout: 30_000, maxBuffer: 1024 * 1024, env: { ...process.env, HOME: process.env.USERPROFILE ?? process.env.HOME } }
+      );
+      return (stdout + stderr).trim();
+    } catch (err: any) {
+      const out = ((err.stdout ?? "") + (err.stderr ?? "")).trim();
+      return out || `Error: ${err.message}`;
+    }
+  }
+
+  loggedTool("common_search", "BM25 keyword search on common knowledge (shared brain).", { query: z.string() }, async ({ query }) => ({
+    content: [{ type: "text", text: maybeInjectCommonContext(await runCommonQmd(["search", query])) }],
+  }));
+
+  loggedTool("common_vsearch", "Vector semantic search on common knowledge.", { query: z.string() }, async ({ query }) => ({
+    content: [{ type: "text", text: maybeInjectCommonContext(await runCommonQmd(["vsearch", query])) }],
+  }));
+
+  loggedTool("common_get", "Read a note from common knowledge.", { path: z.string() }, async ({ path }) => ({
+    content: [{ type: "text", text: maybeInjectCommonContext(await runCommonQmd(["get", path])) }],
+  }));
+
+  // Only register write tools if subagent has common write access
+  if (!subagent?.commonReadOnly) {
+
+  loggedTool("common_write", "Write a note to common knowledge. Call common_commit when done.", {
+    path: z.string().describe("Note path, e.g. knowledge/entities/my-note.md"),
+    content: z.string().describe("Full markdown content including YAML frontmatter"),
+    force: z.boolean().optional(),
+  }, async ({ path, content, force }) => {
+    const pathErr = validateCommonPath(path);
+    if (pathErr) return { content: [{ type: "text", text: `Invalid path: ${pathErr}` }], isError: true };
+
+    const validation = commonBrain.validateNote(content);
+    if (!validation.valid && !force) {
+      return { content: [{ type: "text", text: `Validation failed:\n${validation.warnings.map(w => `  - ${w}`).join("\n")}` }], isError: true };
+    }
+
+    commonBrain.writeNote(path, content);
+    let indexResult = "";
+    try { indexResult = await runCommonQmd(["update"]); } catch { indexResult = "(index skipped)"; }
+
+    return {
+      content: [{ type: "text", text: maybeInjectCommonContext(`Written to common: ${path} (${content.length} chars)\n\nIndex: ${indexResult}\n\n💡 Call common_commit when done with changes.`) }],
+    };
+  });
+
+  loggedTool("common_list", "List notes in common knowledge.", {
+    folder: z.string().optional(),
+    tag: z.string().optional(),
+    limit: z.number().optional(),
+  }, async ({ folder, tag, limit }) => {
+    const maxResults = limit ?? 50;
+    const allPaths = commonBrain.getAllNotes();
+    const results: string[] = [];
+    for (const p of allPaths) {
+      if (results.length >= maxResults) break;
+      if (folder && !p.startsWith(folder)) continue;
+      if (tag) {
+        const note = commonBrain.loadNote(p);
+        if (!note || !note.tags.some(t => t === tag || t.startsWith(tag + "/"))) continue;
+      }
+      const note = commonBrain.loadNote(p);
+      results.push(`${p}  —  ${note?.title ?? p}`);
+    }
+    return {
+      content: [{ type: "text", text: maybeInjectCommonContext(results.length > 0 ? `Found ${results.length} common note(s):\n\n${results.join("\n")}` : "No common knowledge notes found.") }],
+    };
+  });
+
+  loggedTool("common_commit", "Git commit pending changes in common knowledge.", {
+    message: z.string().describe("Commit message"),
+  }, async ({ message }) => {
+    const authorName = subagent?.name ?? subagentId;
+    const authorEmail = `sa-${subagentId}@workbot`;
+    try {
+      const result = await commonGitCommit(message, authorName, authorEmail);
+      if (result === "nothing to commit") {
+        return { content: [{ type: "text", text: maybeInjectCommonContext("Nothing to commit — common knowledge is up to date.") }] };
+      }
+      const log = await commonGitLog(5);
+      return { content: [{ type: "text", text: maybeInjectCommonContext(`Committed: ${result}\nAuthor: ${authorName} <${authorEmail}>\n\nRecent commits:\n${log}`) }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Commit failed: ${err.message}` }], isError: true };
+    }
+  });
+
+  } // end commonReadOnly check
 
   // ── Debug ────────────────────────────────────────────────────────────
 

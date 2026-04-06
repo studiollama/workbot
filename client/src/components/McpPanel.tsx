@@ -65,8 +65,8 @@ export default function McpPanel() {
   return (
     <div className="space-y-6">
       {/* QMD Configuration */}
-      <div className="bg-surface-card rounded-xl p-5 space-y-4">
-        <h3 className="font-medium">Brain Search (QMD)</h3>
+      <div className="glass-card p-4 sm:p-5 space-y-4">
+        <h3 className="font-medium text-sm sm:text-base">Brain Search (QMD)</h3>
 
         <div className="space-y-2">
           <label className="text-xs text-theme-secondary uppercase tracking-wider">
@@ -122,9 +122,9 @@ export default function McpPanel() {
       </div>
 
       {/* Tools list */}
-      <div className="bg-surface-card rounded-xl p-5 space-y-4">
+      <div className="glass-card p-4 sm:p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-medium">MCP Tools</h3>
+          <h3 className="font-medium text-sm sm:text-base">MCP Tools</h3>
           <span className="text-xs text-theme-muted">{tools.length} registered</span>
         </div>
 
@@ -132,7 +132,7 @@ export default function McpPanel() {
           {tools.map((tool) => (
             <div
               key={tool.name}
-              className="flex items-start gap-3 p-3 rounded-lg bg-surface-input/50"
+              className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-3 p-3 rounded-lg bg-surface-input/50"
             >
               <code className="text-xs text-accent-400 font-mono whitespace-nowrap pt-0.5">
                 {tool.name}
