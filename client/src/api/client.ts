@@ -256,13 +256,13 @@ export const api = {
     request<{ path: string }>("/mcp/pick-file", { method: "POST" }),
 
   // Development
-  getDevStatus: () => request<DevStatus>("/dev/status"),
+  getDevStatus: (scope?: string) => request<DevStatus>(`/dev/status${scope ? `?scope=${scope}` : ""}`),
 
   // Development migration + multi-project API
   migrateDevFolder: () =>
     request<{ ok: boolean; project?: any; message?: string }>("/dev/migrate", { method: "POST" }),
-  addDevProject: (repoUrl: string, name?: string) =>
-    request<DevProject>("/dev/projects", { method: "POST", body: JSON.stringify({ repoUrl, name }) }),
+  addDevProject: (repoUrl: string, name?: string, scope?: string) =>
+    request<DevProject>("/dev/projects", { method: "POST", body: JSON.stringify({ repoUrl, name, scope }) }),
   removeDevProject: (id: string) =>
     request<{ ok: boolean }>(`/dev/projects/${id}`, { method: "DELETE" }),
   cloneDevProject: (id: string) =>

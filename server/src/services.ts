@@ -741,4 +741,53 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "Connection",
     ...telnetService,
   },
+  betterstack: {
+    kind: "rest",
+    name: "Better Stack",
+    validateUrl: "https://uptime.betterstack.com/api/v2/monitors?per_page=1",
+    authHeader: (token) => ({
+      Authorization: `Bearer ${token}`,
+    }),
+    extractUser: (data) => {
+      const count = data?.pagination?.total ?? data?.data?.length ?? 0;
+      return `${count} monitors`;
+    },
+    tokenUrl: "https://betterstack.com/docs/uptime/api/getting-started-with-uptime-api/",
+    tokenPrefix: "",
+    tokenLabel: "Uptime API Token",
+    authNote: "Enter your Uptime API token as the main token. Add the Telemetry (Logs) source token below.",
+    extraFields: [
+      {
+        key: "telemetry_token",
+        label: "Telemetry Source Token",
+        placeholder: "Your Better Stack Logs source token",
+      },
+    ],
+    difficulty: "API Key + Config",
+  },
+  guru: {
+    kind: "rest",
+    name: "Guru",
+    validateUrl: "https://api.getguru.com/api/v1/whoami",
+    authHeader: (token, extras) => {
+      // Basic auth: username:token
+      const username = extras?.username || "";
+      return {
+        Authorization: "Basic " + Buffer.from(`${username}:${token}`).toString("base64"),
+      };
+    },
+    extractUser: (data) => data.email ?? (data.firstName ? `${data.firstName} ${data.lastName}` : "Connected"),
+    tokenUrl: "https://developer.getguru.com/docs/getting-started",
+    tokenPrefix: "",
+    tokenLabel: "API Token",
+    authNote: "User Token: enter your email or Guru username. Collection Token: enter the Collection ID.",
+    extraFields: [
+      {
+        key: "username",
+        label: "User (email) or Collection ID",
+        placeholder: "you@company.com or collection-id",
+      },
+    ],
+    difficulty: "API Key + Config",
+  },
 };

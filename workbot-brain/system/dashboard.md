@@ -1,3 +1,11 @@
+---
+tags:
+  - entity
+  - status/active
+  - domain/infrastructure
+aliases: [Dashboard, workbot dashboard]
+---
+
 # Workbot Dashboard & MCP Services
 
 > Reference doc. Do NOT load at boot. Read when you need to interact with external services.
@@ -128,3 +136,7 @@ const githubToken = store.github?.token;
 | `client/src/components/ServiceDrawer.tsx` | Drawer with dnd-kit sortable + toggles |
 | `.workbot/services.json` | Token store (gitignored, project root) |
 | `.workbot/dashboard.json` | Dashboard layout config (gitignored, project root) |
+
+## Related
+
+- See also: [[CDPD — See Common Knowledge]]

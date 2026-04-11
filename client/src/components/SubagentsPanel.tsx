@@ -141,6 +141,7 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, con
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [showServices, setShowServices] = useState(false);
   const [editingName, setEditingName] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [nameValue, setNameValue] = useState(s.name);
   const [showUserForm, setShowUserForm] = useState(false);
   const [newUsername, setNewUsername] = useState("");
@@ -212,8 +213,6 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, con
               <a
                 href={`/subagent/${s.id}`}
                 className="font-medium hover:text-accent-400 transition"
-                onDoubleClick={(e) => { e.preventDefault(); setEditingName(true); }}
-                title="Double-click to rename"
               >
                 {s.name}
               </a>
@@ -225,11 +224,12 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, con
           </div>
           {s.description && <p className="text-xs text-theme-secondary mt-0.5 truncate">{s.description}</p>}
         </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Primary actions */}
           {s.session ? (
             <button onClick={async () => {
               try { await api.stopSubagent(s.id); onRefresh(); } catch {}
-            }} className="px-2 py-1 text-xs bg-red-700 hover:bg-red-600 text-white rounded transition">
+            }} className="px-2 py-1 text-xs bg-red-500/15 text-red-500 dark:bg-red-700 dark:text-white rounded transition hover:bg-red-500/25 dark:hover:bg-red-600">
               Stop
             </button>
           ) : (
@@ -241,15 +241,44 @@ function SubagentCard({ subagent: s, onToggle, onSpawn, onDelete, onRefresh, con
             className="px-2 py-1 text-xs bg-teal-700 hover:bg-teal-600 text-white rounded transition disabled:opacity-50">
             {terminalLoading ? "..." : "Terminal"}
           </button>
-          <a href={`/subagent/${s.id}`} className="px-2 py-1 text-xs bg-surface-input hover:bg-surface-hover text-theme-secondary rounded transition">
-            Dashboard
-          </a>
-          <button onClick={onToggle} className="px-2 py-1 text-xs bg-surface-input hover:bg-surface-hover text-theme-secondary rounded transition">
-            {s.enabled ? "Disable" : "Enable"}
-          </button>
-          <button onClick={onDelete} className="px-2 py-1 text-xs text-theme-secondary hover:text-red-400 transition">
-            Delete
-          </button>
+
+          {/* Three-dot menu */}
+          <div className="relative">
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="p-1.5 rounded hover:bg-surface-hover text-theme-secondary transition"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <circle cx="10" cy="4" r="1.5" />
+                <circle cx="10" cy="10" r="1.5" />
+                <circle cx="10" cy="16" r="1.5" />
+              </svg>
+            </button>
+            {showMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                <div className="absolute right-0 top-8 z-20 w-40 glass-card p-1 shadow-lg">
+                  <a href={`/subagent/${s.id}`}
+                    className="block w-full text-left px-3 py-1.5 text-xs text-theme-secondary hover:bg-surface-hover hover:text-theme-primary rounded transition">
+                    Dashboard
+                  </a>
+                  <button onClick={() => { setShowMenu(false); setEditingName(true); }}
+                    className="block w-full text-left px-3 py-1.5 text-xs text-theme-secondary hover:bg-surface-hover hover:text-theme-primary rounded transition">
+                    Rename
+                  </button>
+                  <button onClick={() => { setShowMenu(false); onToggle(); }}
+                    className="block w-full text-left px-3 py-1.5 text-xs text-theme-secondary hover:bg-surface-hover hover:text-theme-primary rounded transition">
+                    {s.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <div className="border-t border-theme my-1" />
+                  <button onClick={() => { setShowMenu(false); onDelete(); }}
+                    className="block w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 rounded transition">
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

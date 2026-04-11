@@ -7,6 +7,7 @@ const DEV_CONFIG_PATH = join(STORE_DIR, "development.json");
 export interface DevProject {
   id: string;
   name: string;
+  scope?: string | null; // null/undefined = host, subagent ID = that agent's project
   repoUrl: string;
   owner: string;
   repo: string;

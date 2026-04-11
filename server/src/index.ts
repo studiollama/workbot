@@ -181,18 +181,22 @@ app.set("workflowEngine", workflowEngine);
 
 // Auto-spawn subagents after a delay (let remote-control start first)
 import { loadSubagents, getSubagentClaudeHome, getSubagentLinuxUser } from "./subagents.js";
+import { execFileSync } from "child_process";
 import { resolve as resolvePath } from "path";
 setTimeout(() => {
   const subs = loadSubagents().filter((s) => s.autoSpawn && s.enabled);
   if (subs.length === 0) return;
   console.log(`[auto-spawn] Spawning ${subs.length} subagent(s)...`);
   for (const s of subs) {
-    // Skip if already running
-    const existing = activeSessions.get(s.id);
-    if (existing) {
-      try { process.kill(existing.pid, 0); console.log(`[auto-spawn] ${s.id} already running (PID ${existing.pid}), skipping`); continue; }
-      catch { activeSessions.delete(s.id); }
-    }
+    // Skip if tmux session already running
+    const tmuxCheck = `sa-${s.id}`;
+    const linuxUser = getSubagentLinuxUser(s.id);
+    try {
+      execFileSync("runuser", ["-u", linuxUser, "--", "tmux", "has-session", "-t", tmuxCheck], { stdio: "pipe" });
+      console.log(`[auto-spawn] ${s.id} already running (tmux session ${tmuxCheck}), skipping`);
+      activeSessions.set(s.id, { pid: 0, startedAt: new Date().toISOString() });
+      continue;
+    } catch { /* not running, proceed */ }
     const cwd = resolvePath(PROJECT_ROOT, "workbot-brain", "subagents", s.id);
     const args = ["remote-control", "--name", s.name, "--spawn", "same-dir", "--verbose"];
     args.push("--permission-mode", s.bypassPermissions ? "bypassPermissions" : "auto");
@@ -203,11 +207,9 @@ setTimeout(() => {
 
     const envStr = envArgs.map((e) => `export ${e}`).join(" && ");
     const claudeCmd = `${envStr} && cd ${cwd} && exec claude ${args.join(" ")}`;
-    const linuxUser = getSubagentLinuxUser(s.id);
-    const tmuxSession = `sa-${s.id}`;
 
     // Use tmux so session survives disconnects
-    const proc = spawn("runuser", ["-u", linuxUser, "--", "tmux", "new-session", "-d", "-s", tmuxSession, "-x", "200", "-y", "50", claudeCmd], {
+    const proc = spawn("runuser", ["-u", linuxUser, "--", "tmux", "new-session", "-d", "-s", tmuxCheck, "-x", "200", "-y", "50", claudeCmd], {
       cwd, stdio: "ignore", detached: true,
     });
     proc.unref();
