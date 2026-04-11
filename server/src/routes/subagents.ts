@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import { resolve } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -14,6 +14,7 @@ import {
   ensureBrainDir,
   getSubagentClaudeHome,
   getSubagentLinuxUser,
+  regenerateSubagentHooks,
 } from "../subagents.js";
 import { STORE_DIR } from "../paths.js";
 
@@ -38,6 +39,31 @@ const router = Router();
 // Active spawned sessions (exported for auto-spawn registration)
 export const activeSessions = new Map<string, { pid: number; startedAt: string }>();
 
+// Check if a subagent's tmux session is actually running
+function isTmuxSessionAlive(subagentId: string): boolean {
+  const linuxUser = getSubagentLinuxUser(subagentId);
+  const tmuxSession = `sa-${subagentId}`;
+  try {
+    execFileSync("runuser", ["-u", linuxUser, "--", "tmux", "has-session", "-t", tmuxSession], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Get session info, checking tmux as source of truth
+function getSessionStatus(subagentId: string): { pid: number; startedAt: string } | null {
+  const tracked = activeSessions.get(subagentId);
+  if (tracked) return tracked;
+  // Not in memory map — check if tmux session exists anyway (e.g. after auto-spawn where runuser exited)
+  if (isTmuxSessionAlive(subagentId)) {
+    const session = { pid: 0, startedAt: new Date().toISOString() };
+    activeSessions.set(subagentId, session);
+    return session;
+  }
+  return null;
+}
+
 // Active web terminals (ttyd instances)
 const activeTerminals = new Map<string, { pid: number; port: number; startedAt: string }>();
 const TERMINAL_PORT_MIN = 7700;
@@ -56,7 +82,7 @@ router.get("/", (_req, res) => {
   const subagents = loadSubagents();
   const result = subagents.map((s) => ({
     ...s,
-    session: activeSessions.get(s.id) ?? null,
+    session: getSessionStatus(s.id),
   }));
   res.json(result);
 });
@@ -65,7 +91,7 @@ router.get("/", (_req, res) => {
 router.get("/:id", (req, res) => {
   const s = getSubagent(req.params.id);
   if (!s) return res.status(404).json({ error: "Subagent not found" });
-  res.json({ ...s, session: activeSessions.get(s.id) ?? null });
+  res.json({ ...s, session: getSessionStatus(s.id) });
 });
 
 // POST /api/subagents
@@ -117,16 +143,10 @@ router.post("/auto-spawn", (_req, res) => {
   for (const s of subagents) {
     if (!s.autoSpawn || !s.enabled) continue;
 
-    // Check if already running
-    const existing = activeSessions.get(s.id);
-    if (existing) {
-      try {
-        process.kill(existing.pid, 0);
-        results.push({ id: s.id, spawned: false, error: "already running" });
-        continue;
-      } catch {
-        activeSessions.delete(s.id);
-      }
+    // Check if already running (tmux is source of truth)
+    if (isTmuxSessionAlive(s.id)) {
+      results.push({ id: s.id, spawned: false, error: "already running" });
+      continue;
     }
 
     // Reuse the spawn logic by making an internal request
@@ -154,7 +174,7 @@ router.post("/auto-spawn", (_req, res) => {
 
       const tmuxSession = `sa-${s.id}`;
       // Kill any existing tmux session for this subagent first
-      try { require("child_process").execFileSync("runuser", ["-u", linuxUser, "--", "tmux", "kill-session", "-t", tmuxSession], { stdio: "pipe" }); } catch {}
+      try { execFileSync("runuser", ["-u", linuxUser, "--", "tmux", "kill-session", "-t", tmuxSession], { stdio: "pipe" }); } catch {}
       const proc = spawn("runuser", ["-u", linuxUser, "--", "tmux", "new-session", "-d", "-s", tmuxSession, "-x", "200", "-y", "50", claudeCmd], {
         cwd, stdio: "ignore", detached: true,
       });
@@ -170,6 +190,21 @@ router.post("/auto-spawn", (_req, res) => {
   res.json({ results });
 });
 
+// POST /api/subagents/regenerate-hooks — update hook configs for all subagents
+router.post("/regenerate-hooks", (_req, res) => {
+  const subagents = loadSubagents();
+  const results: { id: string; ok: boolean; error?: string }[] = [];
+  for (const s of subagents) {
+    try {
+      regenerateSubagentHooks(s.id);
+      results.push({ id: s.id, ok: true });
+    } catch (err: any) {
+      results.push({ id: s.id, ok: false, error: err.message });
+    }
+  }
+  res.json({ results });
+});
+
 // POST /api/subagents/:id/stop — kill all processes for this subagent
 router.post("/:id/stop", (req, res) => {
   const s = getSubagent(req.params.id);
@@ -179,7 +214,6 @@ router.post("/:id/stop", (req, res) => {
 
   // Kill all processes running as this subagent's user
   try {
-    const { execFileSync } = require("child_process");
     execFileSync("pkill", ["-9", "-u", linuxUser], { stdio: "pipe" });
   } catch { /* no processes or user doesn't exist */ }
 
@@ -199,15 +233,10 @@ router.post("/:id/spawn", (req, res) => {
   // Ensure brain directory exists
   ensureBrainDir(s);
 
-  // Check if already running
-  const existing = activeSessions.get(s.id);
-  if (existing) {
-    try {
-      process.kill(existing.pid, 0); // Check if still alive
-      return res.json({ sessionId: s.id, pid: existing.pid, alreadyRunning: true });
-    } catch {
-      activeSessions.delete(s.id);
-    }
+  // Check if already running (tmux is source of truth)
+  if (isTmuxSessionAlive(s.id)) {
+    const session = getSessionStatus(s.id);
+    return res.json({ sessionId: s.id, pid: session?.pid ?? 0, alreadyRunning: true });
   }
 
   // Spawn Claude remote-control session for this subagent
@@ -249,7 +278,7 @@ router.post("/:id/spawn", (req, res) => {
   const tmuxSession = `sa-${s.id}`;
 
   // Kill any existing tmux session for this subagent first
-  try { require("child_process").execFileSync("runuser", ["-u", linuxUser, "--", "tmux", "kill-session", "-t", tmuxSession], { stdio: "pipe" }); } catch {}
+  try { execFileSync("runuser", ["-u", linuxUser, "--", "tmux", "kill-session", "-t", tmuxSession], { stdio: "pipe" }); } catch {}
 
   const proc = spawn("runuser", ["-u", linuxUser, "--", "tmux", "new-session", "-d", "-s", tmuxSession, "-x", "200", "-y", "50", claudeCmd], {
     cwd,

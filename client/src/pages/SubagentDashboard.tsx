@@ -5,6 +5,7 @@ import McpPanel from "../components/McpPanel";
 import LogsPanel from "../components/LogsPanel";
 import WorkflowsPanel from "../components/WorkflowsPanel";
 import BrainPanel from "../components/BrainPanel";
+import DevPanel from "../components/DevPanel";
 
 interface SubagentInfo {
   id: string;
@@ -30,7 +31,7 @@ export default function SubagentDashboard({ onLogout }: Props) {
   const [subagent, setSubagent] = useState<SubagentInfo | null>(null);
   const [services, setServices] = useState<Record<string, ServiceStatus>>({});
   const [loading, setLoading] = useState(true);
-  const validTabs = ["services", "brain", "workflows", "mcp", "logs"] as const;
+  const validTabs = ["services", "brain", "development", "workflows", "mcp", "logs"] as const;
   type SubTab = typeof validTabs[number];
   const activeTab: SubTab = validTabs.includes(urlTab as any) ? (urlTab as SubTab) : "services";
   const setActiveTab = (tab: SubTab) => navigate(`/subagent/${id}/${tab}`);
@@ -72,6 +73,7 @@ export default function SubagentDashboard({ onLogout }: Props) {
   const tabs = [
     { key: "services", label: "Services" },
     { key: "brain", label: "Brain" },
+    { key: "development", label: "Dev" },
     { key: "workflows", label: "Workflows" },
     { key: "mcp", label: "MCP" },
     { key: "logs", label: "Logs" },
@@ -168,6 +170,7 @@ export default function SubagentDashboard({ onLogout }: Props) {
         )}
 
         {activeTab === "mcp" && <McpPanel />}
+        {activeTab === "development" && <DevPanel scope={id} />}
         {activeTab === "workflows" && <WorkflowsPanel scope={id} />}
         {activeTab === "logs" && <LogsPanel scope={id} />}
         {activeTab === "brain" && <BrainPanel scope={`subagent:${id}`} />}

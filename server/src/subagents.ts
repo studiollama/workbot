@@ -147,20 +147,22 @@ export function createSubagent(input: {
     `${mcpPrefix}debug_env`,
   ];
   // Project-level settings.local.json — permissions + hooks
+  const brainAbsDir = join(BRAIN_ROOT, brainPath);
+  const hooksDir = join(PROJECT_ROOT, "hooks");
   const projectSettings = {
     permissions: { allow: mcpToolPerms, deny: [] as string[] },
     hooks: {
       SessionStart: [{
         hooks: [{
           type: "command",
-          command: `echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"BRAIN BOOT: You MUST read context/ACTIVE.md via brain_context or brain_get BEFORE doing anything else. You are subagent ${id}. Only use YOUR scoped MCP tools (${mcpServerName}). Do not skip this step."}}'`,
+          command: `SUBAGENT_ID=${id} BRAIN_DIR=${brainAbsDir} bash ${hooksDir}/subagent-session-start.sh`,
           statusMessage: "Loading brain context...",
         }],
       }],
       Stop: [{
         hooks: [{
           type: "command",
-          command: `echo '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"BRAIN SAVE: Before ending, you MUST: 1) Update context/ACTIVE.md with current session state via brain_write. 2) Write any new reusable knowledge to the appropriate brain folder (decisions/, patterns/, corrections/, entities/, projects/). Do NOT skip this step."}}'`,
+          command: `SUBAGENT_ID=${id} BRAIN_DIR=${brainAbsDir} bash ${hooksDir}/subagent-stop.sh`,
           statusMessage: "Saving brain context...",
         }],
       }],
@@ -173,8 +175,7 @@ export function createSubagent(input: {
 
   // Write user-level and project-level claude settings for MCP approval
   // Claude stores project settings at ~/.claude/projects/{path-slug}/settings.json
-  const brainAbsPath = join(BRAIN_ROOT, brainPath);
-  const pathSlug = brainAbsPath.replace(/\//g, "-");
+  const pathSlug = brainAbsDir.replace(/\//g, "-");
   const userClaudeDir = join(claudeHome, ".claude");
   const projSettingsDir = join(userClaudeDir, "projects", pathSlug);
   mkdirSync(projSettingsDir, { recursive: true });
@@ -216,6 +217,61 @@ export function createSubagent(input: {
   saveSubagents(all);
 
   return subagent;
+}
+
+// Regenerate hook configs for an existing subagent (call after hook scripts change)
+export function regenerateSubagentHooks(id: string): void {
+  const sub = getSubagent(id);
+  if (!sub) throw new Error(`Subagent "${id}" not found`);
+
+  const brainDir = join(BRAIN_ROOT, sub.brainPath);
+  const claudeDir = join(brainDir, ".claude");
+  const hooksDir = join(PROJECT_ROOT, "hooks");
+  const brainAbsDir = join(BRAIN_ROOT, sub.brainPath);
+  const mcpServerName = `workbot-${id}`;
+  const mcpPrefix = `mcp__${mcpServerName}__`;
+
+  const commonReadOnly = sub.commonReadOnly !== false;
+  const mcpToolPerms = [
+    `${mcpPrefix}brain_search`, `${mcpPrefix}brain_vsearch`, `${mcpPrefix}brain_get`,
+    `${mcpPrefix}brain_write`, `${mcpPrefix}brain_update`, `${mcpPrefix}brain_list`,
+    `${mcpPrefix}brain_context`, `${mcpPrefix}service_status`, `${mcpPrefix}service_request`,
+    `${mcpPrefix}git_credentials`, `${mcpPrefix}common_search`, `${mcpPrefix}common_vsearch`,
+    `${mcpPrefix}common_get`, `${mcpPrefix}common_list`,
+    ...(commonReadOnly ? [] : [`${mcpPrefix}common_write`, `${mcpPrefix}common_commit`]),
+    `${mcpPrefix}debug_env`,
+  ];
+
+  const projectSettings = {
+    permissions: { allow: mcpToolPerms, deny: [] as string[] },
+    hooks: {
+      SessionStart: [{
+        hooks: [{
+          type: "command",
+          command: `SUBAGENT_ID=${id} BRAIN_DIR=${brainAbsDir} bash ${hooksDir}/subagent-session-start.sh`,
+          statusMessage: "Loading brain context...",
+        }],
+      }],
+      Stop: [{
+        hooks: [{
+          type: "command",
+          command: `SUBAGENT_ID=${id} BRAIN_DIR=${brainAbsDir} bash ${hooksDir}/subagent-stop.sh`,
+          statusMessage: "Saving brain context...",
+        }],
+      }],
+    },
+  };
+
+  if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
+  writeFileSync(join(claudeDir, "settings.local.json"), JSON.stringify(projectSettings, null, 2));
+
+  // Also update per-project user settings
+  const claudeHome = getSubagentClaudeHome(id);
+  const pathSlug = brainAbsDir.replace(/\//g, "-");
+  const projSettingsDir = join(claudeHome, ".claude", "projects", pathSlug);
+  if (existsSync(projSettingsDir)) {
+    writeFileSync(join(projSettingsDir, "settings.json"), JSON.stringify(projectSettings, null, 2));
+  }
 }
 
 export function updateSubagent(

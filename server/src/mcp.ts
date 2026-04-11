@@ -85,9 +85,8 @@ if (SUBAGENT_ID) console.error(`[mcp] Subagent mode: ${SUBAGENT_ID}, argv: ${pro
 // Security: non-root users MUST use --subagent flag to prevent privilege escalation
 import { userInfo } from "os";
 const currentUser = userInfo();
-// Allow root and the main workbot user to run host MCP. Block subagent users (sa-*).
-if (!SUBAGENT_ID && currentUser.uid !== 0 && currentUser.username.startsWith("sa-")) {
-  console.error("[mcp] FATAL: Subagent users must specify --subagent <id>. Refusing to start in host mode.");
+if (!SUBAGENT_ID && currentUser.uid !== 0) {
+  console.error("[mcp] FATAL: Non-root users must specify --subagent <id>. Refusing to start in host mode.");
   process.exit(1);
 }
 // Security: validate that --subagent ID matches the running Linux user (sa-{id})

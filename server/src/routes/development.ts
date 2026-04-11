@@ -38,10 +38,13 @@ function hasLegacyDevFolder(): boolean {
 // GET /api/dev/status — list all projects + github connection status
 router.get("/status", (_req, res) => {
   const config = loadDevConfig();
+  const scope = (req.query.scope as string) || null;
+  // Filter projects by scope
+  const projects = config.projects.filter((p) => (p.scope || null) === scope);
   // Detect legacy single-folder setup: development/.git exists but no project subfolders
-  const needsMigration = existsSync(join(DEV_BASE, ".git"));
+  const needsMigration = !scope && existsSync(join(DEV_BASE, ".git"));
   res.json({
-    projects: config.projects,
+    projects,
     githubConnected: !!getGitHubToken(),
     needsMigration,
   });
@@ -106,7 +109,7 @@ router.post("/migrate", (_req, res) => {
 
 // POST /api/dev/projects — add a new project
 router.post("/projects", (req, res) => {
-  const { repoUrl, name } = req.body;
+  const { repoUrl, name, scope } = req.body;
   if (!repoUrl || typeof repoUrl !== "string") return res.status(400).json({ error: "repoUrl is required" });
 
   const parsed = parseGitHubUrl(repoUrl);
@@ -119,6 +122,7 @@ router.post("/projects", (req, res) => {
   const project: DevProject = {
     id,
     name: name || parsed.repo,
+    scope: scope || null,
     repoUrl,
     owner: parsed.owner,
     repo: parsed.repo,

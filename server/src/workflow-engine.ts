@@ -20,6 +20,8 @@ import {
 } from "./workflows-config.js";
 import { loadStore, SERVICES } from "./services.js";
 import { loadMcpConfig } from "./mcp-config.js";
+import { getAllNotes, buildLinkGraph, loadNote, BRAIN_ROOT } from "./brain-utils.js";
+import { getCommonBrain, validateCommonPath, commonGitCommit } from "./common-brain-utils.js";
 import { execFile } from "child_process";
 import { promisify } from "util";
 
@@ -386,7 +388,138 @@ export class WorkflowEngine {
   private async execMcpTool(config: McpToolConfig): Promise<unknown> {
     const mcpConfig = loadMcpConfig();
 
-    // Brain tools — call QMD CLI directly
+    // Brain tools — native implementations for tools not in QMD CLI
+    if (config.tool === "brain_orphans") {
+      const graph = buildLinkGraph();
+      const orphans: string[] = [];
+      const noIncoming: string[] = [];
+      const noOutgoing: string[] = [];
+      for (const [path, { outgoing, incoming }] of graph) {
+        if (path.startsWith("_")) continue;
+        if (incoming.length === 0 && outgoing.length === 0) orphans.push(path);
+        else if (incoming.length === 0) noIncoming.push(path);
+        else if (outgoing.length === 0) noOutgoing.push(path);
+      }
+      const sections: string[] = [];
+      if (orphans.length > 0) sections.push(`Full orphans (no links at all) — ${orphans.length}:\n${orphans.map(p => `  ✗ ${p}`).join("\n")}`);
+      if (noOutgoing.length > 0) sections.push(`No outgoing links — ${noOutgoing.length}:\n${noOutgoing.map(p => `  ⚠ ${p}`).join("\n")}`);
+      if (noIncoming.length > 0) sections.push(`No incoming links — ${noIncoming.length}:\n${noIncoming.slice(0, 30).map(p => `  △ ${p}`).join("\n")}`);
+      return sections.length > 0 ? sections.join("\n\n") : "No orphans found — all notes are linked.";
+    }
+
+    if (config.tool === "brain_links") {
+      const graph = buildLinkGraph();
+      const path = String(config.args.path ?? "");
+      const entry = graph.get(path);
+      if (!entry) return `Note not found in link graph: ${path}`;
+      return `Note: ${path}\n\nOutgoing links (${entry.outgoing.length}):\n${entry.outgoing.map(l => `  → [[${l}]]`).join("\n") || "  (none)"}\n\nIncoming links (${entry.incoming.length}):\n${entry.incoming.map(l => `  ← ${l}`).join("\n") || "  (none)"}`;
+    }
+
+    if (config.tool === "brain_list") {
+      const { folder, tag, limit } = config.args as any;
+      const maxResults = limit ?? 50;
+      const allPaths = getAllNotes();
+      const results: string[] = [];
+      for (const notePath of allPaths) {
+        if (folder && !notePath.startsWith(folder)) continue;
+        const meta = loadNote(notePath);
+        if (!meta) continue;
+        if (tag && !meta.tags.some((t: string) => t === tag || t === `#${tag}`)) continue;
+        results.push(`${notePath} — ${meta.title} [${meta.tags.join(", ")}]`);
+        if (results.length >= maxResults) break;
+      }
+      return results.length > 0 ? results.join("\n") : "No notes found matching filters.";
+    }
+
+    // Common brain tools — native implementations
+    if (config.tool === "common_orphans") {
+      const cb = getCommonBrain();
+      const graph = cb.buildLinkGraph();
+      const orphans: string[] = [];
+      const noIncoming: string[] = [];
+      const noOutgoing: string[] = [];
+      for (const [path, { outgoing, incoming }] of graph) {
+        if (path.startsWith("_") || path === "context/README.md") continue;
+        if (incoming.length === 0 && outgoing.length === 0) orphans.push(path);
+        else if (incoming.length === 0) noIncoming.push(path);
+        else if (outgoing.length === 0) noOutgoing.push(path);
+      }
+      const sections: string[] = [];
+      if (orphans.length > 0) sections.push(`Full orphans (no links at all) — ${orphans.length}:\n${orphans.map(p => `  ✗ ${p}`).join("\n")}`);
+      if (noOutgoing.length > 0) sections.push(`No outgoing links — ${noOutgoing.length}:\n${noOutgoing.map(p => `  ⚠ ${p}`).join("\n")}`);
+      if (noIncoming.length > 0) sections.push(`No incoming links — ${noIncoming.length}:\n${noIncoming.slice(0, 30).map(p => `  △ ${p}`).join("\n")}`);
+      return sections.length > 0 ? sections.join("\n\n") : "No orphans found — all common notes are linked.";
+    }
+
+    if (config.tool === "common_list") {
+      const cb = getCommonBrain();
+      const { folder, tag, limit } = config.args as any;
+      const maxResults = limit ?? 50;
+      const allPaths = cb.getAllNotes();
+      const results: string[] = [];
+      for (const p of allPaths) {
+        if (results.length >= maxResults) break;
+        if (folder && !p.startsWith(folder)) continue;
+        if (tag) {
+          const note = cb.loadNote(p);
+          if (!note || !note.tags.some((t: string) => t === tag || t.startsWith(tag + "/"))) continue;
+        }
+        const note = cb.loadNote(p);
+        const title = note?.title ?? p;
+        const tags = note?.tags.length ? ` [${note.tags.join(", ")}]` : "";
+        results.push(`${p}  —  ${title}${tags}`);
+      }
+      return results.length > 0 ? results.join("\n") : "No common notes found matching filters.";
+    }
+
+    if (config.tool === "common_links") {
+      const cb = getCommonBrain();
+      const graph = cb.buildLinkGraph();
+      const path = String(config.args.path ?? "");
+      const entry = graph.get(path);
+      if (!entry) return `Note not found in common link graph: ${path}`;
+      return `Note: ${path}\n\nOutgoing links (${entry.outgoing.length}):\n${entry.outgoing.map((l: string) => `  → [[${l}]]`).join("\n") || "  (none)"}\n\nIncoming links (${entry.incoming.length}):\n${entry.incoming.map((l: string) => `  ← ${l}`).join("\n") || "  (none)"}`;
+    }
+
+    if (config.tool === "common_get") {
+      const cb = getCommonBrain();
+      const path = String(config.args.path ?? "");
+      const note = cb.loadNote(path);
+      if (!note) return `Note not found: ${path}`;
+      return note.content;
+    }
+
+    if (config.tool === "common_commit") {
+      const message = String(config.args.message ?? "Workflow auto-commit");
+      const result = await commonGitCommit(message, "workflow");
+      return result;
+    }
+
+    // Common brain QMD tools (search, vsearch, get, write)
+    if (config.tool.startsWith("common_")) {
+      const qmdCmd = config.tool.replace("common_", "");
+      if (!mcpConfig.qmdCliPath) {
+        throw new Error("QMD not configured");
+      }
+      const nodePath = mcpConfig.nodePath.replace(/\\/g, "/");
+      const qmdPath = mcpConfig.qmdCliPath.replace(/\\/g, "/");
+      const commonIndex = (await import("./common-brain-utils.js")).COMMON_QMD_INDEX;
+      const indexArgs = ["--index", commonIndex];
+
+      const cmdArgs: string[] = [qmdPath, ...indexArgs, qmdCmd];
+      if (config.args.query) cmdArgs.push(String(config.args.query));
+      if (config.args.path) cmdArgs.push(String(config.args.path));
+      if (config.args.content) cmdArgs.push(String(config.args.content));
+
+      const { stdout, stderr } = await execFileAsync(nodePath, cmdArgs, {
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, HOME: process.env.USERPROFILE ?? process.env.HOME },
+      });
+      return (stdout + stderr).trim();
+    }
+
+    // Brain tools — call QMD CLI for search/get/write/etc.
     if (config.tool.startsWith("brain_")) {
       const qmdCmd = config.tool.replace("brain_", "");
       if (!mcpConfig.qmdCliPath) {

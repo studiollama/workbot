@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, type DevProject, type DevStatus, type GitCommit, type GitIssue, type GitPR } from "../api/client";
 
-export default function DevPanel() {
+export default function DevPanel({ scope }: { scope?: string } = {}) {
   const [status, setStatus] = useState<DevStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -10,13 +10,14 @@ export default function DevPanel() {
   const [addBusy, setAddBusy] = useState(false);
   const [error, setError] = useState("");
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [migrating, setMigrating] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const s = await api.getDevStatus();
+      const s = await api.getDevStatus(scope);
       setStatus(s);
     } catch {} finally { setLoading(false); }
-  }, []);
+  }, [scope]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -25,7 +26,7 @@ export default function DevPanel() {
     setAddBusy(true);
     setError("");
     try {
-      await api.addDevProject(repoUrl.trim(), projectName.trim() || undefined);
+      await api.addDevProject(repoUrl.trim(), projectName.trim() || undefined, scope);
       setRepoUrl("");
       setProjectName("");
       setShowAdd(false);
@@ -48,7 +49,6 @@ export default function DevPanel() {
   }
 
   const projects = status?.projects ?? [];
-  const [migrating, setMigrating] = useState(false);
 
   async function handleMigrate() {
     setMigrating(true);

@@ -28,6 +28,8 @@ const SERVICE_LOGOS: Record<string, { icon: string; color: string }> = {
   supabase:    { icon: "supabase", color: "3FCF8E" },
   render:      { icon: "render", color: "46E3B7" },
   postgresql:  { icon: "postgresql", color: "4169E1" },
+  betterstack: { icon: "betterstack", color: "4CE47C" },
+  guru:        { icon: "guru", color: "5CC7C1" },
   // oracle uses inline SVG below (not on simpleicons)
   dagster:     { icon: "dagster", color: "4F43DD" },
 };

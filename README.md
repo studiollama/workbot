@@ -488,7 +488,7 @@ Key changes if upgrading an existing Docker deployment:
 4. **init: true** — Add to docker-compose.yml for proper signal handling (kill switch)
 5. **Port range 7700-7719** — Add to docker-compose ports for subagent web terminals
 6. **No cap_drop** — Remove `cap_drop: ALL` and `cap_add` sections (sudo/useradd need full caps)
-7. **Permission mode** — Use `--permission-mode bypassPermissions` 
+7. **Permission mode** — Use `--permission-mode auto` instead of `bypassPermissions` (org may block it)
 8. **Active key persistence** — The encryption key now persists across session timeouts (only deleted on explicit logout or container shutdown)
 9. **Multi-instance services** — Old single-key services auto-migrate to `{type}:default` instances on first load
 
@@ -502,9 +502,3 @@ Key Dockerfile additions since initial release:
 - Native Claude Code installer (not npm)
 - `ttyd` for web terminals
 - Oracle Instant Client (optional, for Oracle DB connections)
-
----
-
-## License
-
-Private — Studio Llama
