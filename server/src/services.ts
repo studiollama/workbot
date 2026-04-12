@@ -13,6 +13,7 @@ import { sshService } from "./connections/ssh.js";
 import { sftpService } from "./connections/sftp.js";
 import { ftpService } from "./connections/ftp.js";
 import { telnetService } from "./connections/telnet.js";
+import { wireguardService } from "./connections/wireguard.js";
 
 export { PROJECT_ROOT, STORE_DIR, STORE_PATH };
 export type { StoredService };
@@ -856,6 +857,12 @@ export const SERVICES: Record<string, ServiceConfig> = {
     name: "Telnet",
     difficulty: "Connection",
     ...telnetService,
+  },
+  wireguard: {
+    kind: "connection",
+    name: "WireGuard VPN",
+    difficulty: "VPN Config",
+    ...wireguardService,
   },
   betterstack: {
     kind: "rest",

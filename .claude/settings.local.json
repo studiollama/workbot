@@ -59,6 +59,17 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"BRAIN CHECK: Before responding, search the brain for relevant knowledge using brain_search or brain_vsearch if the user question relates to past decisions, patterns, corrections, projects, or entities. Use what you find to inform your response. Skip this for trivial questions (greetings, clarifications, etc).\"}}'",
+            "statusMessage": "Checking brain..."
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
