@@ -230,6 +230,8 @@ export default function Dashboard({ onLogout }: DashboardProps) {
               difficulty={config[key]?.difficulty}
               extraFields={config[key]?.extraFields}
               oauth={config[key]?.oauth}
+              kind={config[key]?.kind}
+              connectionFields={config[key]?.connectionFields}
               status={services[key] ?? Object.values(services).find((s) => s.serviceType === key && s.connected) ?? { connected: false }}
               allServices={services}
               onUpdate={refresh}
@@ -374,6 +376,8 @@ function ServiceCard({
   difficulty?: string;
   extraFields?: { key: string; label: string; placeholder: string }[];
   oauth?: { scopes: string[]; redirectPath: string };
+  kind?: string;
+  connectionFields?: { key: string; label: string; placeholder: string; type: string; required?: boolean; defaultValue?: string }[];
   status: { connected: boolean; user?: string };
   allServices: Record<string, any>;
   onUpdate: () => Promise<void>;
@@ -415,8 +419,9 @@ function ServiceCard({
 
   async function handleConnect(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!token.trim()) return;
-    // Validate extra fields
+    // Connection services: token comes from extras, REST services need explicit token
+    if (kind !== "connection" && !token.trim()) return;
+    // Validate extra fields (REST)
     if (extraFields) {
       for (const field of extraFields) {
         if (!extras[field.key]?.trim()) {
@@ -425,14 +430,26 @@ function ServiceCard({
         }
       }
     }
+    // Validate connection fields
+    if (connectionFields) {
+      for (const field of connectionFields) {
+        if (field.required && !extras[field.key]?.trim()) {
+          setError(`${field.label} is required`);
+          return;
+        }
+      }
+    }
     setError("");
     setBusy(true);
     try {
+      // For connection services, pass a placeholder token and all fields as extras
+      const connectToken = kind === "connection" ? (extras.config || extras.password || "connection") : token;
+      const connectExtras = kind === "connection" ? extras : (extraFields ? extras : undefined);
       await api.connectServiceInstance(
         serviceKey,
-        token,
+        connectToken,
         instanceName.trim() || "Default",
-        extraFields ? extras : undefined
+        connectExtras
       );
       setToken("");
       setExtras({});
@@ -743,8 +760,88 @@ function ServiceCard({
         </div>
       )}
 
+      {/* Disconnected state — Connection services (WireGuard, PostgreSQL, SSH, etc.) */}
+      {!status.connected && !isCodex && kind === "connection" && connectionFields && (
+        <>
+          {!showForm ? (
+            <button
+              onClick={() => setShowForm(true)}
+              className="w-full bg-accent-600 hover:bg-accent-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
+            >
+              Connect
+            </button>
+          ) : (
+            <form onSubmit={handleConnect} className="space-y-2">
+              <input
+                type="text"
+                placeholder="Instance name (e.g. Default, Office VPN)"
+                value={instanceName}
+                onChange={(e) => setInstanceName(e.target.value)}
+                className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+              />
+              {connectionFields.map((field) => (
+                <div key={field.key} className="space-y-1">
+                  <label className="text-xs text-theme-secondary">{field.label}{field.required && <span className="text-red-400 ml-0.5">*</span>}</label>
+                  {field.type === "textarea" ? (
+                    <textarea
+                      placeholder={field.placeholder}
+                      value={extras[field.key] ?? field.defaultValue ?? ""}
+                      onChange={(e) => setExtras((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      rows={8}
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-accent-500 resize-y"
+                    />
+                  ) : field.type === "password" ? (
+                    <input
+                      type="password"
+                      placeholder={field.placeholder}
+                      value={extras[field.key] ?? ""}
+                      onChange={(e) => setExtras((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    />
+                  ) : field.type === "number" ? (
+                    <input
+                      type="number"
+                      placeholder={field.placeholder}
+                      value={extras[field.key] ?? field.defaultValue ?? ""}
+                      onChange={(e) => setExtras((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder={field.placeholder}
+                      value={extras[field.key] ?? field.defaultValue ?? ""}
+                      onChange={(e) => setExtras((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    />
+                  )}
+                </div>
+              ))}
+              {authNote && <p className="text-xs text-yellow-400">{authNote}</p>}
+              {error && <p className="text-xs text-red-400">{error}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="flex-1 bg-accent-600 hover:bg-accent-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition"
+                >
+                  {busy ? "Connecting..." : "Connect"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowForm(false); setExtras({}); setError(""); }}
+                  className="text-sm text-theme-secondary hover:text-theme-primary px-3"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </>
+      )}
+
       {/* Disconnected state — PAT services */}
-      {!status.connected && !isCodex && (
+      {!status.connected && !isCodex && kind !== "connection" && (
         <>
           {!showForm ? (
             <button

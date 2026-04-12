@@ -5,20 +5,39 @@ import { join } from "path";
 const WG_DIR = "/etc/wireguard";
 const WG_CONF = join(WG_DIR, "wg0.conf");
 
+function ensureWireGuardInstalled(): void {
+  try {
+    execSync("which wg-quick", { stdio: "pipe" });
+  } catch {
+    // Install wireguard-tools if not present
+    console.log("[wireguard] Installing wireguard-tools...");
+    execSync("sudo apt-get update -qq && sudo apt-get install -y -qq wireguard-tools iproute2 iptables", {
+      timeout: 60000,
+      stdio: "pipe",
+    });
+  }
+}
+
 export const wireguardService = {
   protocol: "vpn" as const,
-  fields: [
+  defaultPort: 51820,
+  docsUrl: "https://www.wireguard.com/quickstart/",
+  tokenLabel: "Config",
+  authNote: "Paste your WireGuard .conf file contents. The config will be written to /etc/wireguard/wg0.conf and the VPN will connect.",
+  connectionFields: [
     {
       key: "config",
-      label: "WireGuard Config",
-      placeholder: "[Interface]\nPrivateKey = ...\nAddress = 10.0.0.2/32\nDNS = 1.1.1.1\n\n[Peer]\nPublicKey = ...\nEndpoint = vpn.example.com:51820\nAllowedIPs = 0.0.0.0/0",
+      label: "WireGuard Config (.conf)",
+      placeholder: "[Interface]\nPrivateKey = YOUR_PRIVATE_KEY\nAddress = 10.0.0.2/32\nDNS = 1.1.1.1\n\n[Peer]\nPublicKey = SERVER_PUBLIC_KEY\nEndpoint = vpn.example.com:51820\nAllowedIPs = 0.0.0.0/0",
       type: "textarea" as const,
+      required: true,
     },
     {
       key: "autoConnect",
       label: "Auto-connect on container start",
-      placeholder: "true",
+      placeholder: "true or false",
       type: "text" as const,
+      defaultValue: "true",
     },
   ],
   validate: async (params: Record<string, string>) => {
@@ -27,11 +46,15 @@ export const wireguardService = {
       throw new Error("Invalid WireGuard config — must contain [Interface] and [Peer] sections");
     }
 
-    // Write config and try to bring up the interface
+    // Install wireguard if needed
+    ensureWireGuardInstalled();
+
+    // Write config
     mkdirSync(WG_DIR, { recursive: true });
     writeFileSync(WG_CONF, config, { mode: 0o600 });
 
     try {
+      // Bring up the interface
       execSync("wg-quick up wg0", { timeout: 15000, stdio: "pipe" });
       const status = execSync("wg show wg0", { timeout: 5000 }).toString().trim();
 
@@ -41,9 +64,8 @@ export const wireguardService = {
 
       return { user: `VPN: ${endpoint}` };
     } catch (err: any) {
-      // Clean up on failure
       try { execSync("wg-quick down wg0", { stdio: "pipe" }); } catch {}
-      throw new Error(`WireGuard connect failed: ${err.message}`);
+      throw new Error(`WireGuard connect failed: ${err.stderr?.toString() || err.message}`);
     }
   },
   execute: async (params: Record<string, string>, command: string) => {
@@ -57,16 +79,13 @@ export const wireguardService = {
         }
       }
       case "up": {
-        if (!existsSync(WG_CONF)) {
-          throw new Error("No WireGuard config found. Connect first.");
-        }
+        ensureWireGuardInstalled();
+        if (!existsSync(WG_CONF)) throw new Error("No WireGuard config found. Connect first.");
         execSync("wg-quick up wg0", { timeout: 15000, stdio: "pipe" });
         return "WireGuard connected";
       }
       case "down": {
-        try {
-          execSync("wg-quick down wg0", { timeout: 10000, stdio: "pipe" });
-        } catch {}
+        try { execSync("wg-quick down wg0", { timeout: 10000, stdio: "pipe" }); } catch {}
         return "WireGuard disconnected";
       }
       case "disconnect": {
