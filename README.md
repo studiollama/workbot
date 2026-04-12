@@ -474,31 +474,293 @@ workbot/
 
 ## Upgrading from Previous Versions
 
-### Single → Multi-Project Development
+### Single to Multi-Project Development
 
 If your workbot has a `development/` folder with a single cloned repo (the old setup), the Dev tab will show a migration banner. Click **Convert** to automatically move it into the new multi-project structure (`development/{project-id}/`).
 
-### Old Docker Setup → Current
+### Multi-instance Services
 
-Key changes if upgrading an existing Docker deployment:
+Old single-key services auto-migrate to `{type}:default` instances on first load (e.g., `github` becomes `github:default`).
 
-1. **Claude Code native installer** — Replace `npm install -g @anthropic-ai/claude-code` with `curl -fsSL https://claude.ai/install.sh | bash` (run as workbot user)
-2. **tmux** — Add `tmux` to the Dockerfile's apt-get install line (sessions survive disconnects)
-3. **Subagent Linux users** — The `subagents` group and user bootstrap in the entrypoint are required for subagent isolation
-4. **init: true** — Add to docker-compose.yml for proper signal handling (kill switch)
-5. **Port range 7700-7719** — Add to docker-compose ports for subagent web terminals
-6. **No cap_drop** — Remove `cap_drop: ALL` and `cap_add` sections (sudo/useradd need full caps)
-7. **Permission mode** — Use `--permission-mode auto` instead of `bypassPermissions` (org may block it)
-8. **Active key persistence** — The encryption key now persists across session timeouts (only deleted on explicit logout or container shutdown)
-9. **Multi-instance services** — Old single-key services auto-migrate to `{type}:default` instances on first load
+---
 
-### Docker Files Reference
+## Docker Deployment Reference
 
-The production Dockerfile, entrypoint.sh, and docker-compose.yml are maintained in the deployment directory (not in the repo). See the Installation section above for the current recommended versions.
+### Critical Fixes and Lessons Learned
 
-Key Dockerfile additions since initial release:
-- `tmux` for session persistence
-- `groupadd subagents` + `useradd` for agent isolation
-- Native Claude Code installer (not npm)
-- `ttyd` for web terminals
-- Oracle Instant Client (optional, for Oracle DB connections)
+These issues were discovered during production deployment. Apply them to avoid hours of debugging:
+
+#### 1. MCP Host Mode Security Check
+
+The `server/src/mcp.ts` security check blocks non-root users from running the host MCP server. In Docker, the `workbot` user (uid 1001) is non-root but IS the host user. The check must only block `sa-*` subagent users:
+
+```typescript
+// CORRECT — allows workbot user in Docker
+if (!SUBAGENT_ID && currentUser.uid !== 0 && currentUser.username.startsWith("sa-")) {
+  // block
+}
+
+// WRONG — blocks workbot user, breaks all MCP tools
+if (!SUBAGENT_ID && currentUser.uid !== 0) {
+  // block
+}
+```
+
+**This fix gets overwritten by external syncs.** Always verify after merging external changes.
+
+#### 2. Claude Code Install Method
+
+Use `npm install -g` (global npm), NOT the native installer (`curl https://claude.ai/install.sh`). The native installer puts claude at `~/.local/bin/claude` which gets overwritten by the Docker home volume mount. Global npm install puts it at `/usr/local/bin/claude` which survives volume mounts.
+
+```dockerfile
+# CORRECT
+RUN npm install -g @anthropic-ai/claude-code@latest @tobilu/qmd
+
+# WRONG — binary lost on volume mount
+# RUN curl -fsSL https://claude.ai/install.sh | bash
+```
+
+#### 3. Entrypoint: tmux + keep-alive
+
+Claude remote-control sessions can disconnect/exit. Use `tmux` in detached mode with `tail -f /dev/null` as the container keep-alive:
+
+```bash
+tmux new-session -d -s workbot "cd /app && claude remote-control ..."
+exec tail -f /dev/null
+```
+
+Do NOT use `exec tmux ...` (container dies when tmux exits) or `while true; sleep 30` loops (unreliable).
+
+#### 4. Healthcheck
+
+Do NOT use `claude auth status` as healthcheck — it's slow, can hang, and causes restart loops. Use the Express API instead:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-kfs", "https://localhost:3001/api/dashboard-auth/setup-status"]
+  interval: 60s
+  timeout: 10s
+  retries: 5
+  start_period: 120s
+```
+
+Or disable healthcheck entirely (`disable: true`) if containers are stable.
+
+#### 5. Memory Limits
+
+Three containers sharing 6GB WSL2 RAM need `mem_limit: 1500m` each, NOT `4g`. Overcommit causes kernel OOM kills that look like clean exits (exit code 0, `OOMKilled=false`).
+
+#### 6. Active Key Persistence
+
+The encryption key (`.workbot/.active-key`) must NOT be deleted on server startup — only on explicit logout or container stop. Otherwise, MCP tools lose access to encrypted services after every tsx watch restart.
+
+#### 7. Capabilities
+
+Containers need `NET_ADMIN` and `NET_RAW` for WireGuard VPN and subagent Linux user isolation. Do NOT use `cap_drop: ALL` — it breaks `sudo`, `useradd`, `wg-quick`, and process management.
+
+#### 8. Claude Auth in Docker
+
+After building a new image, authenticate Claude Code:
+
+```bash
+docker run -it --rm --user workbot \
+  -v workbots_claude-home-myproject:/home/workbot \
+  --entrypoint claude \
+  workbots-workbot-myproject login
+```
+
+Auth persists in the named Docker volume. Only needs to be done once per volume.
+
+#### 9. Settings Merge Conflicts
+
+`.claude/settings.local.json` is per-container and gitignored. When pulling updates, git stash/pop can create merge conflicts with `<<<<<<` markers that break JSON parsing, causing hooks to fail silently. Always verify this file is valid JSON after a merge.
+
+### Current Dockerfile
+
+```dockerfile
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y \
+    git curl sudo tmux wireguard-tools iproute2 iptables \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+    libpango-1.0-0 libcairo2 libasound2 libxshmfence1 libglib2.0-0 \
+    fonts-liberation libx11-xcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) \
+    signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] \
+    https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+
+# Claude Code + QMD (global npm — survives volume mounts)
+RUN npm install -g @anthropic-ai/claude-code@latest @tobilu/qmd
+
+# Workbot user with passwordless sudo
+RUN useradd -m -s /bin/bash workbot && \
+    echo "workbot ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/workbot
+
+# Subagents group for Linux user isolation
+RUN groupadd -f subagents
+
+# Git trust all directories
+RUN git config --global --add safe.directory '*'
+
+# Pre-create dirs owned by workbot
+RUN mkdir -p /app/node_modules && chown workbot:workbot /app/node_modules && \
+    chown -R workbot:workbot /var/log
+
+USER workbot
+ENV HOME=/home/workbot
+RUN git config --global --add safe.directory '*'
+
+WORKDIR /app
+COPY --chown=workbot:workbot entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+```
+
+### Current docker-compose.yml (per service)
+
+```yaml
+services:
+  workbot-myproject:
+    build: .
+    container_name: workbot-myproject
+    hostname: workbot-myproject
+    init: true
+    environment:
+      - WORKBOT_NAME=My Project
+      - SESSION_SECRET=change-me-random-string
+    ports:
+      - "3010:3001"      # Server (HTTPS)
+      - "5190:5173"      # Dashboard (HTTPS)
+      - "7700-7704:7700-7704"  # Web terminals
+    volumes:
+      - ./workbot-myproject:/app
+      - nm-myproject:/app/node_modules
+      - claude-home-myproject:/home/workbot
+    networks:
+      - myproject-net
+    restart: unless-stopped
+    tty: true
+    tmpfs:
+      - /tmp:size=512M
+      - /run:size=64M
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    pids_limit: 1024
+    mem_limit: 1500m
+    cpus: 2.0
+    healthcheck:
+      disable: true
+
+volumes:
+  nm-myproject:
+  claude-home-myproject:
+
+networks:
+  myproject-net:
+    driver: bridge
+```
+
+### Current entrypoint.sh
+
+```bash
+#!/bin/bash
+set -e
+
+WORKBOT_DIR="/app/.workbot"
+mkdir -p "$WORKBOT_DIR"
+
+# Reset mcp.json to container defaults
+cat > "$WORKBOT_DIR/mcp.json" << EOF
+{
+  "qmdCliPath": "/usr/local/lib/node_modules/@tobilu/qmd/dist/cli/qmd.js",
+  "nodePath": "$(which node)",
+  "agentsFilePath": "AGENTS.md",
+  "claudeMdPath": "CLAUDE.md",
+  "serverPort": 3001,
+  "clientPort": 5173
+}
+EOF
+
+# Bootstrap dashboard.json
+if [ ! -f "$WORKBOT_DIR/dashboard.json" ]; then
+  cat > "$WORKBOT_DIR/dashboard.json" << EOF
+{
+  "enabledServices": [],
+  "workbotName": "${WORKBOT_NAME:-Workbot}",
+  "accentColor": "orange-1"
+}
+EOF
+fi
+
+# Bootstrap services.json
+if [ ! -f "$WORKBOT_DIR/services.json" ]; then
+  echo "{}" > "$WORKBOT_DIR/services.json"
+fi
+
+# Install npm dependencies if missing
+if [ ! -d "/app/node_modules/concurrently" ]; then
+  echo "[entrypoint] Installing dependencies..."
+  cd /app && npm install && npm install -w client && npm install -w server
+fi
+
+# Generate TLS certs if missing
+if [ ! -f "$WORKBOT_DIR/certs/server.key" ]; then
+  echo "[entrypoint] Generating TLS certificates..."
+  cd /app && node node_modules/tsx/dist/cli.mjs -e "
+    import { ensureCerts } from './server/src/certs.ts';
+    ensureCerts().then(() => process.exit(0));
+  "
+fi
+
+# Auto-connect WireGuard VPN if config exists
+if [ -f /etc/wireguard/wg0.conf ]; then
+  echo "[entrypoint] Connecting WireGuard VPN..."
+  wg-quick up wg0 2>&1 || echo "[entrypoint] WireGuard failed (non-fatal)"
+fi
+
+# Start dashboard
+echo "[entrypoint] Starting dashboard..."
+cd /app
+node node_modules/tsx/dist/cli.mjs watch server/src/index.ts &
+cd /app/client && node /app/node_modules/vite/bin/vite.js --host 0.0.0.0 &
+cd /app
+sleep 3
+
+# Start Claude remote-control in tmux
+echo "[entrypoint] Starting Claude remote-control (${WORKBOT_NAME}) in tmux..."
+tmux new-session -d -s workbot "cd /app && claude remote-control \
+  --name '${WORKBOT_NAME}' \
+  --permission-mode bypassPermissions \
+  --spawn same-dir \
+  --verbose"
+
+# Keep container alive
+exec tail -f /dev/null
+```
+
+### Updating Claude Code in Containers
+
+```bash
+docker exec workbot-myproject sudo npm install -g @anthropic-ai/claude-code@latest
+docker restart workbot-myproject
+```
+
+### Updating Workbot Code in Containers
+
+```bash
+cd /path/to/workbot-myproject
+git pull origin main
+docker exec workbot-myproject npm install
+docker restart workbot-myproject
+```
