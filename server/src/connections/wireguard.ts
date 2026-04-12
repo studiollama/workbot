@@ -7,11 +7,11 @@ const WG_CONF = join(WG_DIR, "wg0.conf");
 
 function ensureWireGuardInstalled(): void {
   try {
-    execSync("which wg-quick", { stdio: "pipe" });
+    execSync("sudo which wg-quick", { stdio: "pipe" });
   } catch {
     // Install wireguard-tools if not present
     console.log("[wireguard] Installing wireguard-tools...");
-    execSync("sudo apt-get update -qq && sudo apt-get install -y -qq wireguard-tools iproute2 iptables", {
+    execSync("sudo apt-get update -qq && sudo apt-get install -y -qq wireguard-tools iproute2 iptables 2>&1", {
       timeout: 60000,
       stdio: "pipe",
     });
@@ -50,13 +50,13 @@ export const wireguardService = {
     ensureWireGuardInstalled();
 
     // Write config
-    mkdirSync(WG_DIR, { recursive: true });
-    writeFileSync(WG_CONF, config, { mode: 0o600 });
+    execSync(`sudo mkdir -p ${WG_DIR}`, { stdio: "pipe" });
+    execSync(`sudo bash -c 'cat > ${WG_CONF} && chmod 600 ${WG_CONF}'`, { input: config, stdio: ["pipe", "pipe", "pipe"] });
 
     try {
       // Bring up the interface
-      execSync("wg-quick up wg0", { timeout: 15000, stdio: "pipe" });
-      const status = execSync("wg show wg0", { timeout: 5000 }).toString().trim();
+      execSync("sudo wg-quick up wg0", { timeout: 15000, stdio: "pipe" });
+      const status = execSync("sudo wg show wg0", { timeout: 5000 }).toString().trim();
 
       // Extract peer endpoint for display
       const endpointMatch = status.match(/endpoint:\s+(\S+)/);
@@ -64,7 +64,7 @@ export const wireguardService = {
 
       return { user: `VPN: ${endpoint}` };
     } catch (err: any) {
-      try { execSync("wg-quick down wg0", { stdio: "pipe" }); } catch {}
+      try { execSync("sudo wg-quick down wg0", { stdio: "pipe" }); } catch {}
       throw new Error(`WireGuard connect failed: ${err.stderr?.toString() || err.message}`);
     }
   },
@@ -72,7 +72,7 @@ export const wireguardService = {
     switch (command) {
       case "status": {
         try {
-          const status = execSync("wg show wg0", { timeout: 5000 }).toString().trim();
+          const status = execSync("sudo wg show wg0", { timeout: 5000 }).toString().trim();
           return status || "Interface wg0 not found";
         } catch {
           return "WireGuard not connected";
@@ -81,16 +81,16 @@ export const wireguardService = {
       case "up": {
         ensureWireGuardInstalled();
         if (!existsSync(WG_CONF)) throw new Error("No WireGuard config found. Connect first.");
-        execSync("wg-quick up wg0", { timeout: 15000, stdio: "pipe" });
+        execSync("sudo wg-quick up wg0", { timeout: 15000, stdio: "pipe" });
         return "WireGuard connected";
       }
       case "down": {
-        try { execSync("wg-quick down wg0", { timeout: 10000, stdio: "pipe" }); } catch {}
+        try { execSync("sudo wg-quick down wg0", { timeout: 10000, stdio: "pipe" }); } catch {}
         return "WireGuard disconnected";
       }
       case "disconnect": {
-        try { execSync("wg-quick down wg0", { stdio: "pipe" }); } catch {}
-        if (existsSync(WG_CONF)) unlinkSync(WG_CONF);
+        try { execSync("sudo wg-quick down wg0", { stdio: "pipe" }); } catch {}
+        try { execSync(`sudo rm -f ${WG_CONF}`, { stdio: "pipe" }); } catch {}
         return "WireGuard disconnected and config removed";
       }
       default:
