@@ -54,7 +54,14 @@ export const wireguardService = {
     execSync(`sudo bash -c 'cat > ${WG_CONF} && chmod 600 ${WG_CONF}'`, { input: config, stdio: ["pipe", "pipe", "pipe"] });
 
     try {
-      // Bring up the interface
+      // Bring up the interface — strip PostUp/PreDown sysctl commands that fail in containers
+      // and handle the sysctl issue by setting it before wg-quick runs
+      try { execSync("sudo sysctl -q -w net.ipv4.conf.all.src_valid_mark=1 2>/dev/null", { stdio: "pipe" }); } catch {}
+
+      // Strip sysctl lines from config to prevent wg-quick from trying to set them
+      const cleanedConfig = config.replace(/^PostUp\s*=.*sysctl.*$/gm, "").replace(/^PreDown\s*=.*sysctl.*$/gm, "");
+      execSync(`sudo bash -c 'cat > ${WG_CONF} && chmod 600 ${WG_CONF}'`, { input: cleanedConfig, stdio: ["pipe", "pipe", "pipe"] });
+
       execSync("sudo wg-quick up wg0", { timeout: 15000, stdio: "pipe" });
       const status = execSync("sudo wg show wg0", { timeout: 5000 }).toString().trim();
 
