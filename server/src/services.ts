@@ -647,6 +647,122 @@ export const SERVICES: Record<string, ServiceConfig> = {
     difficulty: "API Key",
   },
 
+  // ── Restored services ──────────────────────────────────────────────
+
+  squarespace: {
+    kind: "rest",
+    name: "Squarespace",
+    validateUrl: "https://api.squarespace.com/1.0/authorization/website",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}`, "User-Agent": "workbot" }),
+    extractUser: (data) => data.website?.siteTitle ?? data.id ?? "Connected",
+    tokenUrl: "https://developers.squarespace.com/",
+    tokenPrefix: "",
+    difficulty: "OAuth Token",
+  },
+  freshdesk: {
+    kind: "rest",
+    name: "Freshdesk",
+    validateUrl: (extras) => `https://${extras.subdomain}.freshdesk.com/api/v2/agents/me`,
+    authHeader: (token) => ({ Authorization: "Basic " + Buffer.from(`${token}:X`).toString("base64") }),
+    extractUser: (data) => data.contact?.name ?? data.contact?.email ?? "Connected",
+    tokenUrl: "https://support.freshdesk.com/en/support/solutions/articles/215517",
+    tokenPrefix: "",
+    extraFields: [{ key: "subdomain", label: "Freshdesk Subdomain", placeholder: "yourcompany" }],
+    difficulty: "API Key + Config",
+  },
+  quickbooks: {
+    kind: "rest",
+    name: "QuickBooks",
+    validateUrl: (extras) => `https://quickbooks.api.intuit.com/v3/company/${extras.realmId}/companyinfo/${extras.realmId}`,
+    authHeader: (token) => ({ Authorization: `Bearer ${token}`, Accept: "application/json" }),
+    extractUser: (data) => data.CompanyInfo?.CompanyName ?? "Connected",
+    tokenUrl: "https://developer.intuit.com/app/developer/playground",
+    tokenPrefix: "",
+    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
+    difficulty: "OAuth Token",
+    extraFields: [{ key: "realmId", label: "Company ID (Realm ID)", placeholder: "123456789" }],
+  },
+  canva: {
+    kind: "rest",
+    name: "Canva",
+    validateUrl: "https://api.canva.com/rest/v1/users/me",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => data.display_name ?? data.email ?? "Connected",
+    tokenUrl: "https://www.canva.dev/docs/connect/authentication/",
+    tokenPrefix: "",
+    authNote: "OAuth token — expires after ~4 hours. Re-connect when expired.",
+    difficulty: "OAuth Token",
+  },
+  gmail: {
+    kind: "rest",
+    name: "Gmail",
+    validateUrl: "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => data.emailAddress ?? "Connected",
+    tokenUrl: "https://developers.google.com/oauthplayground/",
+    tokenPrefix: "",
+    tokenLabel: "Refresh Token",
+    authNote: "Enter your OAuth credentials and click 'Sign in with Google', or paste a refresh token manually.",
+    difficulty: "OAuth + Credentials",
+    extraFields: [
+      { key: "client_id", label: "OAuth Client ID", placeholder: "xxxxx.apps.googleusercontent.com" },
+      { key: "client_secret", label: "OAuth Client Secret", placeholder: "GOCSPX-xxxxx" },
+    ],
+    oauth: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      scopes: [
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.settings.basic",
+        "https://www.googleapis.com/auth/gmail.labels",
+      ],
+      redirectPath: "/api/services/gmail/oauth/callback",
+    },
+    preConnect: async (refreshToken, extras) => {
+      const res = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: extras.client_id,
+          client_secret: extras.client_secret,
+          refresh_token: refreshToken,
+        }).toString(),
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(`Gmail token refresh failed (${res.status}): ${t.slice(0, 200)}`); }
+      const data = await res.json();
+      return { resolvedToken: data.access_token };
+    },
+  },
+  googleadmin: {
+    kind: "rest",
+    name: "Google Admin Console",
+    validateUrl: "https://admin.googleapis.com/admin/directory/v1/users?maxResults=1&customer=my_customer",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => {
+      const users = data.users ?? [];
+      return users.length > 0 ? `${users[0].name?.fullName ?? users[0].primaryEmail ?? "Admin"}` : "Connected";
+    },
+    tokenUrl: "https://developers.google.com/oauthplayground/",
+    tokenPrefix: "",
+    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
+    difficulty: "Admin + OAuth",
+  },
+  ticktick: {
+    kind: "rest",
+    name: "TickTick",
+    validateUrl: "https://api.ticktick.com/open/v1/user",
+    authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
+    extractUser: (data) => data.username ?? data.name ?? "Connected",
+    tokenUrl: "https://developer.ticktick.com/",
+    tokenPrefix: "",
+    authNote: "OAuth token — may expire. Re-connect when expired.",
+    difficulty: "OAuth Token",
+  },
+
   // ── New REST services ───────────────────────────────────────────────
 
   hex: {
