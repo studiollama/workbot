@@ -14,6 +14,7 @@ import { sftpService } from "./connections/sftp.js";
 import { ftpService } from "./connections/ftp.js";
 import { telnetService } from "./connections/telnet.js";
 import { wireguardService } from "./connections/wireguard.js";
+import { winrmService } from "./connections/winrm.js";
 
 export { PROJECT_ROOT, STORE_DIR, STORE_PATH };
 export type { StoredService };
@@ -175,7 +176,7 @@ export interface ConnectionField {
 
 export interface ConnectionServiceConfig extends ServiceConfigBase {
   kind: "connection";
-  protocol: "database" | "ssh" | "sftp" | "ftp" | "telnet";
+  protocol: "database" | "ssh" | "sftp" | "ftp" | "telnet" | "winrm" | "vpn";
   connectionFields: ConnectionField[];
   validate: (params: Record<string, string>) => Promise<{ user: string }>;
   execute: (params: Record<string, string>, command: string) => Promise<string>;
@@ -863,6 +864,12 @@ export const SERVICES: Record<string, ServiceConfig> = {
     name: "WireGuard VPN",
     difficulty: "VPN Config",
     ...wireguardService,
+  },
+  winrm: {
+    kind: "connection",
+    name: "Windows Domain (WinRM)",
+    difficulty: "Connection",
+    ...winrmService,
   },
   betterstack: {
     kind: "rest",

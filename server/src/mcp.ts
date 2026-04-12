@@ -1156,7 +1156,7 @@ loggedTool(
 
 loggedTool(
   "service_execute",
-  "Execute a command or query against a connection-based service (database, SSH, SFTP, FTP, Telnet). Use service_status to see available connection services.",
+  "Execute a command or query against a connection-based service (database, SSH, SFTP, FTP, Telnet, WinRM). Use service_status to see available connection services.",
   {
     service: z
       .string()
@@ -1166,7 +1166,7 @@ loggedTool(
     command: z
       .string()
       .describe(
-        "The command or query to execute. For databases: SQL query. For SSH: shell command. For SFTP/FTP: command like 'ls /path' or 'get /remote/file'. For Telnet: raw command."
+        "The command or query to execute. For databases: SQL query. For SSH: shell command. For SFTP/FTP: command like 'ls /path' or 'get /remote/file'. For Telnet: raw command. For WinRM: PowerShell command."
       ),
   },
   async ({ service, command }) => {

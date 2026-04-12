@@ -53,10 +53,11 @@ const SERVICE_ICONS: Record<string, string> = {
   sftp: "SF",
   ftp: "FTP",
   telnet: "TN",
+  winrm: "WR",
 };
 
 // Microsoft services use the MS logo
-const MS_SERVICES = new Set(["entra", "intune", "security", "sharepoint", "outlook"]);
+const MS_SERVICES = new Set(["entra", "intune", "security", "sharepoint", "outlook", "winrm"]);
 
 interface DashboardProps {
   onLogout: () => void;
