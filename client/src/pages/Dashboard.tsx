@@ -361,6 +361,8 @@ function ServiceCard({
   difficulty,
   extraFields,
   oauth,
+  kind,
+  connectionFields,
   status,
   allServices,
   onUpdate,
