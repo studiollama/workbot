@@ -17,6 +17,28 @@ import { telnetService } from "./connections/telnet.js";
 export { PROJECT_ROOT, STORE_DIR, STORE_PATH };
 export type { StoredService };
 
+async function syncQboRefreshToAirtable(newRefreshToken: string): Promise<void> {
+  const store = loadStore();
+  const airtable = Object.entries(store).find(([k]) => k === "airtable" || k.startsWith("airtable:"));
+  if (!airtable) return;
+  const atToken = airtable[1].token;
+  if (!atToken) return;
+
+  const baseId = "appHHMEcznh7jG3aC";
+  const tableId = "tblcWybeCnP8UX819";
+  const recordId = "recH9CoDcIGAwnJHk";
+
+  await fetch(`https://api.airtable.com/v0/${baseId}/${tableId}/${recordId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${atToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ fields: { Key: newRefreshToken } }),
+  });
+  console.log("[QBO] Refresh token synced to Airtable");
+}
+
 export function loadStore(): Record<string, StoredService> {
   try {
     if (!existsSync(STORE_PATH)) return {};
@@ -159,7 +181,7 @@ export interface RestServiceConfig extends ServiceConfigBase {
   preConnect?: (
     token: string,
     extras: Record<string, string>
-  ) => Promise<{ resolvedToken: string }>;
+  ) => Promise<{ resolvedToken: string; updatedToken?: string }>;
   oauth?: OAuthConfig;
 }
 
@@ -678,9 +700,46 @@ export const SERVICES: Record<string, ServiceConfig> = {
     extractUser: (data) => data.CompanyInfo?.CompanyName ?? "Connected",
     tokenUrl: "https://developer.intuit.com/app/developer/playground",
     tokenPrefix: "",
-    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
+    authNote: "Paste refresh token. Access tokens are auto-refreshed via OAuth.",
     difficulty: "OAuth Token",
-    extraFields: [{ key: "realmId", label: "Company ID (Realm ID)", placeholder: "123456789" }],
+    extraFields: [
+      { key: "realmId", label: "Company ID (Realm ID)", placeholder: "123456789" },
+      { key: "client_id", label: "Client ID", placeholder: "ABc...from Intuit Developer" },
+      { key: "client_secret", label: "Client Secret", placeholder: "ABc...from Intuit Developer" },
+    ],
+    preConnect: async (refreshToken, extras) => {
+      const basicAuth = Buffer.from(`${extras.client_id}:${extras.client_secret}`).toString("base64");
+      const res = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+          Authorization: `Basic ${basicAuth}`,
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+        }).toString(),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`QuickBooks token refresh failed (${res.status}): ${text.slice(0, 200)}`);
+      }
+      const data = await res.json();
+      const newRefreshToken: string | undefined = data.refresh_token;
+
+      // Sync rotated refresh token to Airtable API table for other scripts
+      if (newRefreshToken && newRefreshToken !== refreshToken) {
+        syncQboRefreshToAirtable(newRefreshToken).catch((err) =>
+          console.warn("[QBO] Airtable refresh token sync failed:", err.message)
+        );
+      }
+
+      return {
+        resolvedToken: data.access_token,
+        ...(newRefreshToken && newRefreshToken !== refreshToken ? { updatedToken: newRefreshToken } : {}),
+      };
+    },
   },
   canva: {
     kind: "rest",

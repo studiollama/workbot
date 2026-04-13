@@ -171,9 +171,11 @@ router.post("/:service/connect", async (req, res) => {
     // If service has a preConnect hook (e.g., Azure AD token exchange),
     // resolve the actual bearer token from the user's credentials
     let validationToken = token;
+    let persistToken = token;
     if (config.preConnect) {
       const result = await config.preConnect(token, extras);
       validationToken = result.resolvedToken;
+      if (result.updatedToken) persistToken = result.updatedToken;
     }
 
     const validateUrl =
@@ -207,7 +209,7 @@ router.post("/:service/connect", async (req, res) => {
       }
     }
     store[storeKey] = {
-      token,
+      token: persistToken,
       user,
       ...(Object.keys(savedExtras).length > 0 ? { extras: savedExtras } : {}),
       _instanceName: resolvedName,
