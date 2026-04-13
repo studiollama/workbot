@@ -17,25 +17,44 @@ import { telnetService } from "./connections/telnet.js";
 export { PROJECT_ROOT, STORE_DIR, STORE_PATH };
 export type { StoredService };
 
-async function syncQboRefreshToAirtable(newRefreshToken: string): Promise<void> {
+const QBO_AIRTABLE_BASE = "appHHMEcznh7jG3aC";
+const QBO_AIRTABLE_TABLE = "tblcWybeCnP8UX819";
+const QBO_AIRTABLE_RECORD = "recH9CoDcIGAwnJHk";
+
+function getAirtableToken(): string | null {
   const store = loadStore();
   const airtable = Object.entries(store).find(([k]) => k === "airtable" || k.startsWith("airtable:"));
-  if (!airtable) return;
-  const atToken = airtable[1].token;
+  return airtable?.[1]?.token ?? null;
+}
+
+async function readQboRefreshFromAirtable(): Promise<string | null> {
+  const atToken = getAirtableToken();
+  if (!atToken) return null;
+
+  const res = await fetch(
+    `https://api.airtable.com/v0/${QBO_AIRTABLE_BASE}/${QBO_AIRTABLE_TABLE}/${QBO_AIRTABLE_RECORD}`,
+    { headers: { Authorization: `Bearer ${atToken}` } }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.fields?.Key ?? null;
+}
+
+async function syncQboRefreshToAirtable(newRefreshToken: string): Promise<void> {
+  const atToken = getAirtableToken();
   if (!atToken) return;
 
-  const baseId = "appHHMEcznh7jG3aC";
-  const tableId = "tblcWybeCnP8UX819";
-  const recordId = "recH9CoDcIGAwnJHk";
-
-  await fetch(`https://api.airtable.com/v0/${baseId}/${tableId}/${recordId}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${atToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ fields: { Key: newRefreshToken } }),
-  });
+  await fetch(
+    `https://api.airtable.com/v0/${QBO_AIRTABLE_BASE}/${QBO_AIRTABLE_TABLE}/${QBO_AIRTABLE_RECORD}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${atToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ fields: { Key: newRefreshToken } }),
+    }
+  );
   console.log("[QBO] Refresh token synced to Airtable");
 }
 
@@ -707,7 +726,10 @@ export const SERVICES: Record<string, ServiceConfig> = {
       { key: "client_id", label: "Client ID", placeholder: "ABc...from Intuit Developer" },
       { key: "client_secret", label: "Client Secret", placeholder: "ABc...from Intuit Developer" },
     ],
-    preConnect: async (refreshToken, extras) => {
+    preConnect: async (_storedToken, extras) => {
+      // Airtable is the single source of truth for the refresh token
+      const refreshToken = await readQboRefreshFromAirtable() ?? _storedToken;
+
       const basicAuth = Buffer.from(`${extras.client_id}:${extras.client_secret}`).toString("base64");
       const res = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
         method: "POST",
@@ -728,7 +750,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
       const data = await res.json();
       const newRefreshToken: string | undefined = data.refresh_token;
 
-      // Sync rotated refresh token to Airtable API table for other scripts
+      // Write rotated refresh token back to Airtable and local store
       if (newRefreshToken && newRefreshToken !== refreshToken) {
         syncQboRefreshToAirtable(newRefreshToken).catch((err) =>
           console.warn("[QBO] Airtable refresh token sync failed:", err.message)
