@@ -728,7 +728,8 @@ export const SERVICES: Record<string, ServiceConfig> = {
     ],
     preConnect: async (_storedToken, extras) => {
       // Airtable is the single source of truth for the refresh token
-      const refreshToken = await readQboRefreshFromAirtable() ?? _storedToken;
+      const atRefresh = await readQboRefreshFromAirtable();
+      const refreshToken = atRefresh ?? _storedToken;
 
       const basicAuth = Buffer.from(`${extras.client_id}:${extras.client_secret}`).toString("base64");
       const res = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
@@ -751,16 +752,19 @@ export const SERVICES: Record<string, ServiceConfig> = {
       const newRefreshToken: string | undefined = data.refresh_token;
 
       // Write rotated refresh token back to Airtable and local store
-      if (newRefreshToken && newRefreshToken !== refreshToken) {
-        syncQboRefreshToAirtable(newRefreshToken).catch((err) =>
-          console.warn("[QBO] Airtable refresh token sync failed:", err.message)
-        );
+      if (newRefreshToken) {
+        if (newRefreshToken !== refreshToken) {
+          syncQboRefreshToAirtable(newRefreshToken).catch((err) =>
+            console.warn("[QBO] Airtable refresh token sync failed:", err.message)
+          );
+        }
+        // Always update local store to stay in sync with Airtable
+        if (newRefreshToken !== _storedToken) {
+          return { resolvedToken: data.access_token, updatedToken: newRefreshToken };
+        }
       }
 
-      return {
-        resolvedToken: data.access_token,
-        ...(newRefreshToken && newRefreshToken !== refreshToken ? { updatedToken: newRefreshToken } : {}),
-      };
+      return { resolvedToken: data.access_token };
     },
   },
   canva: {
