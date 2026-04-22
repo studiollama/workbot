@@ -18,7 +18,7 @@ import {
   type PythonConfig,
   type BrainWriteConfig,
 } from "./workflows-config.js";
-import { loadStore, SERVICES } from "./services.js";
+import { loadStore, SERVICES, parseInstanceId } from "./services.js";
 import { loadMcpConfig } from "./mcp-config.js";
 import { getAllNotes, buildLinkGraph, loadNote, BRAIN_ROOT } from "./brain-utils.js";
 import { getCommonBrain, validateCommonPath, commonGitCommit } from "./common-brain-utils.js";
@@ -545,12 +545,13 @@ export class WorkflowEngine {
     // Service request
     if (config.tool === "service_request") {
       const { service, method, url, body, headers: extraHeaders } = config.args as any;
-      const svcConfig = SERVICES[service];
-      if (!svcConfig) throw new Error(`Unknown service: ${service}`);
-      if (svcConfig.kind === "connection") throw new Error(`"${service}" is a connection service — use service_execute`);
+      const { serviceType } = parseInstanceId(service);
+      const svcConfig = SERVICES[serviceType];
+      if (!svcConfig) throw new Error(`Unknown service: ${serviceType}`);
+      if (svcConfig.kind === "connection") throw new Error(`"${serviceType}" is a connection service — use service_execute`);
 
       const store = loadStore();
-      const saved = store[service];
+      const saved = store[service] ?? (service === serviceType ? undefined : store[serviceType]);
       if (!saved) throw new Error(`Service "${service}" not connected`);
 
       let token = saved.token;
@@ -576,6 +577,24 @@ export class WorkflowEngine {
 
       const text = await response.text();
       try { return JSON.parse(text); } catch { return text; }
+    }
+
+    // Service execute (connection services: WinRM, SSH, databases, etc.)
+    if (config.tool === "service_execute") {
+      const { service, command } = config.args as any;
+      const { serviceType } = parseInstanceId(service);
+      const svcConfig = SERVICES[serviceType];
+      if (!svcConfig) throw new Error(`Unknown service: ${serviceType}`);
+      if (svcConfig.kind !== "connection") {
+        throw new Error(`"${serviceType}" is a REST API service — use service_request`);
+      }
+
+      const store = loadStore();
+      const saved = store[service] ?? (service === serviceType ? undefined : store[serviceType]);
+      if (!saved) throw new Error(`Service "${service}" not connected`);
+
+      const allParams: Record<string, string> = { ...saved.extras, password: saved.token };
+      return await svcConfig.execute(allParams, String(command ?? ""));
     }
 
     throw new Error(`Unsupported MCP tool for workflow execution: ${config.tool}`);
@@ -633,8 +652,9 @@ export class WorkflowEngine {
         args.push("--permission-mode", "bypassPermissions");
       }
       const { PROJECT_ROOT } = await import("./paths.js");
+      const timeoutMs = (config.timeout ?? 1800) * 1000;
       const { stdout } = await execFileAsync("claude", args, {
-        timeout: 300_000,
+        timeout: timeoutMs,
         maxBuffer: 10 * 1024 * 1024,
         cwd: config.useProjectContext ? PROJECT_ROOT : undefined,
       });
@@ -657,14 +677,23 @@ export class WorkflowEngine {
         result: structuredResult,
       };
     } catch (err: any) {
-      throw new Error(`Claude prompt failed: ${err.message}`);
+      const stderr = (err.stderr || "").toString().trim();
+      const killed = err.killed ? " (killed — likely timeout)" : "";
+      const detail = stderr ? ` — stderr: ${stderr.slice(-500)}` : "";
+      throw new Error(`Claude prompt failed${killed}${detail}`);
     }
   }
 
   /** Extract <workflow-output>JSON</workflow-output> from Claude's response */
   private extractWorkflowOutput(parsed: any): any {
-    // Search through the conversation for the workflow-output tag
-    const text = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+    // Use the unescaped response text — claude JSON puts it in .result.
+    // JSON.stringify would double-escape quotes/newlines and break JSON.parse below.
+    const text =
+      typeof parsed === "string"
+        ? parsed
+        : typeof parsed?.result === "string"
+          ? parsed.result
+          : JSON.stringify(parsed);
     const match = text.match(/<workflow-output>\s*([\s\S]*?)\s*<\/workflow-output>/);
     if (match) {
       try { return JSON.parse(match[1]); } catch { return null; }

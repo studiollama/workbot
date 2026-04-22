@@ -22,7 +22,8 @@
     "pg": "^8.20.0",
     "selfsigned": "^5.5.0",
     "ssh2": "^1.17.0",
-    "telnet-client": "^2.2.13"
+    "telnet-client": "^2.2.13",
+    "winrm-client": "^0.0.12"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

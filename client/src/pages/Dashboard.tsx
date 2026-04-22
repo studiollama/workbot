@@ -53,10 +53,11 @@ const SERVICE_ICONS: Record<string, string> = {
   sftp: "SF",
   ftp: "FTP",
   telnet: "TN",
+  winrm: "WR",
 };
 
 // Microsoft services use the MS logo
-const MS_SERVICES = new Set(["entra", "intune", "security", "sharepoint", "outlook"]);
+const MS_SERVICES = new Set(["entra", "intune", "security", "sharepoint", "outlook", "winrm"]);
 
 interface DashboardProps {
   onLogout: () => void;
@@ -173,12 +174,11 @@ export default function Dashboard({ onLogout }: DashboardProps) {
         {activeTab === "brain" && <BrainPanel />}
 
         {activeTab === "services" && (() => {
-          const connected = enabledServices.filter(
-            (key) => services[key]?.connected
-          );
-          const disconnected = enabledServices.filter(
-            (key) => !services[key]?.connected
-          );
+          const isServiceConnected = (key: string) =>
+            services[key]?.connected ||
+            Object.values(services).some((s) => s.serviceType === key && s.connected);
+          const connected = enabledServices.filter(isServiceConnected);
+          const disconnected = enabledServices.filter((key) => !isServiceConnected(key));
 
           function handleDisableAll() {
             const connectedOnly = enabledServices.filter(
@@ -445,7 +445,7 @@ function ServiceCard({
     setBusy(true);
     try {
       // For connection services, pass a placeholder token and all fields as extras
-      const connectToken = kind === "connection" ? (extras.config || extras.password || "connection") : token;
+      const connectToken = kind === "connection" ? (token || extras.config || extras.password || "connection") : token;
       const connectExtras = kind === "connection" ? extras : (extraFields ? extras : undefined);
       await api.connectServiceInstance(
         serviceKey,
@@ -733,30 +733,71 @@ function ServiceCard({
           <div className="bg-surface-input/50 rounded-lg p-3 space-y-2">
             <input value={newInstanceName} onChange={(e) => setNewInstanceName(e.target.value)} placeholder="Instance name (e.g. Read Only)" autoFocus
               className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
-            <input type="password" value={newInstanceToken} onChange={(e) => setNewInstanceToken(e.target.value)}
-              placeholder={tokenLabel || (tokenPrefix ? `${tokenPrefix}...` : "API Token")}
-              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono" />
-            {extraFields?.map((field) => (
-              <input key={field.key} value={newInstanceExtras[field.key] || ""} onChange={(e) => setNewInstanceExtras({ ...newInstanceExtras, [field.key]: e.target.value })}
-                placeholder={field.placeholder}
-                className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
-            ))}
+            {kind === "connection" && connectionFields ? (
+              <>
+                {connectionFields.map((field) => (
+                  <div key={field.key} className="space-y-1">
+                    <label className="text-xs text-theme-secondary">{field.label}{field.required && <span className="text-red-400 ml-0.5">*</span>}</label>
+                    {field.type === "textarea" ? (
+                      <textarea
+                        placeholder={field.placeholder}
+                        value={newInstanceExtras[field.key] ?? field.defaultValue ?? ""}
+                        onChange={(e) => setNewInstanceExtras({ ...newInstanceExtras, [field.key]: e.target.value })}
+                        rows={8}
+                        className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs font-mono focus:outline-none focus:ring-1 focus:ring-accent-500 resize-y"
+                      />
+                    ) : (
+                      <input
+                        type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"}
+                        placeholder={field.placeholder}
+                        value={newInstanceExtras[field.key] ?? field.defaultValue ?? ""}
+                        onChange={(e) => setNewInstanceExtras({ ...newInstanceExtras, [field.key]: e.target.value })}
+                        className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs focus:outline-none focus:ring-1 focus:ring-accent-500"
+                      />
+                    )}
+                  </div>
+                ))}
+              </>
+            ) : (
+              <>
+                <input type="password" value={newInstanceToken} onChange={(e) => setNewInstanceToken(e.target.value)}
+                  placeholder={tokenLabel || (tokenPrefix ? `${tokenPrefix}...` : "API Token")}
+                  className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono" />
+                {extraFields?.map((field) => (
+                  <input key={field.key} value={newInstanceExtras[field.key] || ""} onChange={(e) => setNewInstanceExtras({ ...newInstanceExtras, [field.key]: e.target.value })}
+                    placeholder={field.placeholder}
+                    className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
+                ))}
+              </>
+            )}
             <div className="flex gap-2">
               <button onClick={async () => {
-                if (!newInstanceName.trim() || !newInstanceToken.trim()) return;
+                if (!newInstanceName.trim()) return;
+                if (kind === "connection" && connectionFields) {
+                  for (const field of connectionFields) {
+                    if (field.required && !newInstanceExtras[field.key]?.trim()) {
+                      setError(`${field.label} is required`);
+                      return;
+                    }
+                  }
+                } else if (!newInstanceToken.trim()) return;
                 setBusy(true);
+                setError("");
                 try {
-                  await api.connectServiceInstance(serviceKey, newInstanceToken, newInstanceName, extraFields ? newInstanceExtras : undefined);
+                  const connectToken = kind === "connection" ? (newInstanceExtras.config || newInstanceExtras.password || "connection") : newInstanceToken;
+                  const connectExtras = kind === "connection" ? newInstanceExtras : (extraFields ? newInstanceExtras : undefined);
+                  await api.connectServiceInstance(serviceKey, connectToken, newInstanceName, connectExtras);
                   setNewInstanceName(""); setNewInstanceToken(""); setNewInstanceExtras({}); setShowAddInstance(false);
                   await onUpdate();
                 } catch (err: any) { setError(err.message); } finally { setBusy(false); }
-              }} disabled={busy || !newInstanceName.trim() || !newInstanceToken.trim()}
+              }} disabled={busy || !newInstanceName.trim()}
                 className="px-3 py-1 bg-accent-600 hover:bg-accent-700 text-white text-xs rounded transition disabled:opacity-50">
                 {busy ? "..." : "Connect"}
               </button>
-              <button onClick={() => { setShowAddInstance(false); setNewInstanceName(""); setNewInstanceToken(""); }}
+              <button onClick={() => { setShowAddInstance(false); setNewInstanceName(""); setNewInstanceToken(""); setNewInstanceExtras({}); setError(""); }}
                 className="px-3 py-1 text-xs text-theme-secondary hover:text-theme-primary transition">Cancel</button>
             </div>
+            {error && <p className="text-xs text-red-400">{error}</p>}
           </div>
         )}
         </div>
@@ -819,6 +860,28 @@ function ServiceCard({
                   )}
                 </div>
               ))}
+              {tokenLabel && (
+                <div className="space-y-1">
+                  <label className="text-xs text-theme-secondary">{tokenLabel}</label>
+                  {tokenLabel.toLowerCase().includes("key") || tokenLabel.toLowerCase().includes("json") ? (
+                    <textarea
+                      placeholder={tokenLabel}
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      rows={4}
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-accent-500 resize-y"
+                    />
+                  ) : (
+                    <input
+                      type="password"
+                      placeholder={tokenLabel}
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    />
+                  )}
+                </div>
+              )}
               {authNote && <p className="text-xs text-yellow-400">{authNote}</p>}
               {error && <p className="text-xs text-red-400">{error}</p>}
               <div className="flex gap-2">
@@ -831,7 +894,7 @@ function ServiceCard({
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setShowForm(false); setExtras({}); setError(""); }}
+                  onClick={() => { setShowForm(false); setExtras({}); setToken(""); setError(""); }}
                   className="text-sm text-theme-secondary hover:text-theme-primary px-3"
                 >
                   Cancel
@@ -955,13 +1018,23 @@ function ServiceCard({
                       className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                     />
                   ))}
-                  <input
-                    type="password"
-                    placeholder={tokenPlaceholder}
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
-                  />
+                  {tokenLabel?.toLowerCase().includes("json") ? (
+                    <textarea
+                      placeholder={tokenPlaceholder}
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      rows={6}
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-accent-500 resize-y"
+                    />
+                  ) : (
+                    <input
+                      type="password"
+                      placeholder={tokenPlaceholder}
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                    />
+                  )}
                   {authNote && (
                     <p className="text-xs text-yellow-400">{authNote}</p>
                   )}

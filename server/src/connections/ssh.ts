@@ -1,10 +1,12 @@
 import type { ConnectionServiceConfig } from "../services.js";
 import { Client as SSHClient } from "ssh2";
 
+
 function connect(params: Record<string, string>): Promise<SSHClient> {
   return new Promise((resolve, reject) => {
     const conn = new SSHClient();
     const isKey = params.password.includes("-----BEGIN");
+
     conn
       .on("ready", () => resolve(conn))
       .on("error", (err) => reject(err))
