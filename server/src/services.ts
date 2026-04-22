@@ -178,6 +178,7 @@ export interface OAuthConfig {
   tokenUrl: string;
   scopes: string[];
   redirectPath: string;
+  authParams?: Record<string, string>;
 }
 
 // ── Discriminated union: REST vs Connection services ──────────────────
@@ -405,6 +406,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
       tokenUrl: "https://oauth2.googleapis.com/token",
       scopes: ["https://www.googleapis.com/auth/adwords"],
       redirectPath: "/api/services/googleads/oauth/callback",
+      authParams: { access_type: "offline", prompt: "consent" },
     },
     preConnect: async (refreshToken, extras) => {
       const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -861,6 +863,7 @@ export const SERVICES: Record<string, ServiceConfig> = {
         "https://www.googleapis.com/auth/gmail.labels",
       ],
       redirectPath: "/api/services/gmail/oauth/callback",
+      authParams: { access_type: "offline", prompt: "consent" },
     },
     preConnect: async (refreshToken, extras) => {
       const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -919,13 +922,28 @@ export const SERVICES: Record<string, ServiceConfig> = {
   ticktick: {
     kind: "rest",
     name: "TickTick",
-    validateUrl: "https://api.ticktick.com/open/v1/user",
+    validateUrl: "https://api.ticktick.com/open/v1/project",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
-    extractUser: (data) => data.username ?? data.name ?? "Connected",
-    tokenUrl: "https://developer.ticktick.com/",
+    extractUser: (data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        return `${data.length} project${data.length === 1 ? "" : "s"}`;
+      }
+      return "Connected";
+    },
+    tokenUrl: "https://developer.ticktick.com/manage",
     tokenPrefix: "",
-    authNote: "OAuth token — may expire. Re-connect when expired.",
-    difficulty: "OAuth Token",
+    authNote: "Register an app at developer.ticktick.com/manage, set the redirect URL to this workbot's /api/services/ticktick/oauth/callback, then click Connect.",
+    difficulty: "OAuth",
+    extraFields: [
+      { key: "client_id", label: "Client ID", placeholder: "From developer.ticktick.com/manage" },
+      { key: "client_secret", label: "Client Secret", placeholder: "From developer.ticktick.com/manage" },
+    ],
+    oauth: {
+      authUrl: "https://ticktick.com/oauth/authorize",
+      tokenUrl: "https://ticktick.com/oauth/token",
+      scopes: ["tasks:read", "tasks:write"],
+      redirectPath: "/api/services/ticktick/oauth/callback",
+    },
   },
 
   // ── New REST services ───────────────────────────────────────────────

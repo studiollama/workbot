@@ -299,9 +299,8 @@ router.post("/:service/oauth/start", (req, res) => {
     redirect_uri: redirectUri,
     response_type: "code",
     scope: config.oauth.scopes.join(" "),
-    access_type: "offline",
-    prompt: "consent",
     state,
+    ...(config.oauth.authParams ?? {}),
   });
 
   res.json({ authUrl: `${config.oauth.authUrl}?${params.toString()}` });
@@ -351,15 +350,14 @@ router.post("/:service/oauth/reauth", (req, res) => {
     redirect_uri: redirectUri,
     response_type: "code",
     scope: config.oauth.scopes.join(" "),
-    access_type: "offline",
-    prompt: "consent",
     state,
+    ...(config.oauth.authParams ?? {}),
   });
 
   res.json({ authUrl: `${config.oauth.authUrl}?${params.toString()}` });
 });
 
-// GET /api/services/:service/oauth/callback — Google redirects here
+// GET /api/services/:service/oauth/callback — provider redirects here
 router.get("/:service/oauth/callback", async (req, res) => {
   const { code, state, error: oauthError } = req.query;
 
@@ -406,8 +404,16 @@ router.get("/:service/oauth/callback", async (req, res) => {
     const refreshToken = tokenData.refresh_token;
     const accessToken = tokenData.access_token;
 
-    if (!refreshToken) {
-      return res.send(oauthResultPage(false, "No refresh token returned. Revoke access at myaccount.google.com/permissions and try again."));
+    if (!accessToken) {
+      return res.send(oauthResultPage(false, "No access token returned from token exchange."));
+    }
+
+    // Providers that return refresh tokens (Google, etc.) use preConnect to mint fresh
+    // access tokens on each call — so we persist the refresh token. Providers without
+    // refresh tokens (TickTick — long-lived access tokens) persist the access token itself.
+    const storedToken = refreshToken ?? accessToken;
+    if (!refreshToken && config.preConnect) {
+      return res.send(oauthResultPage(false, "Provider returned no refresh token but this service expects one."));
     }
 
     // Validate by calling the service's validation endpoint
@@ -438,7 +444,7 @@ router.get("/:service/oauth/callback", async (req, res) => {
     const oauthName = pending.instanceName?.trim() || "Default";
     const oauthStoreKey = makeInstanceId(service, slugifyInstance(oauthName));
     store[oauthStoreKey] = {
-      token: refreshToken,
+      token: storedToken,
       user,
       extras: {
         client_id: pending.clientId,
