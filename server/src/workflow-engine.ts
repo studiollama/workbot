@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { spawn } from "child_process";
-import cron from "node-cron";
+import { Cron } from "croner";
 import { watch, type FSWatcher } from "fs";
 import {
   loadWorkflows,
@@ -31,7 +31,7 @@ const execFileAsync = promisify(execFile);
 // ── Workflow Engine ────────────────────────────────────────────────────
 
 export class WorkflowEngine {
-  private cronJobs = new Map<string, ReturnType<typeof cron.schedule>>();
+  private cronJobs = new Map<string, Cron>();
   private fileWatchers = new Map<string, FSWatcher>();
   private activeRuns = new Map<string, WorkflowRun>();
   private debounceTimers = new Map<string, NodeJS.Timeout>();
@@ -71,15 +71,29 @@ export class WorkflowEngine {
   private setupWorkflow(wf: WorkflowDefinition): void {
     // Cron schedule — respects per-workflow timezone, falling back to the
     // dashboard timezone so DST transitions are honoured automatically.
-    if (wf.schedule?.cron && cron.validate(wf.schedule.cron)) {
+    // Uses croner (absolute-time scheduling, immune to setTimeout drift
+    // that causes node-cron 4 to silently miss executions under Docker
+    // CPU contention).
+    if (wf.schedule?.cron) {
       const dashboardTz = loadDashboardConfig()?.timezone;
       const timezone = wf.schedule.timezone || dashboardTz;
-      const job = cron.schedule(
-        wf.schedule.cron,
-        () => { this.executeWorkflow(wf.id, "cron"); },
-        timezone ? { timezone } : undefined,
-      );
-      this.cronJobs.set(wf.id, job);
+      try {
+        const job = new Cron(
+          wf.schedule.cron,
+          {
+            ...(timezone ? { timezone } : {}),
+            protect: true,
+            catch: (err: unknown) => {
+              console.error(`[cron] Workflow ${wf.id} threw:`, err);
+            },
+            name: wf.id,
+          },
+          () => { this.executeWorkflow(wf.id, "cron"); },
+        );
+        this.cronJobs.set(wf.id, job);
+      } catch (err) {
+        console.warn(`[cron] Invalid schedule for workflow ${wf.id}:`, (err as Error).message);
+      }
     }
 
     // File change triggers
