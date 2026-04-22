@@ -10,7 +10,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import { resolve, isAbsolute, join } from "path";
-import { SERVICES, loadStore, PROJECT_ROOT } from "./services.js";
+import { SERVICES, loadStore, saveStore, PROJECT_ROOT } from "./services.js";
 import { loadMcpConfig } from "./mcp-config.js";
 import { logToolCall } from "./mcp-logger.js";
 import { readActiveKey, isStoreEncrypted } from "./crypto.js";
@@ -1104,6 +1104,13 @@ loggedTool(
       if (config.preConnect) {
         const result = await config.preConnect(saved.token, saved.extras ?? {});
         token = result.resolvedToken;
+        if (result.updatedToken && result.updatedToken !== saved.token) {
+          const freshStore = await loadStoreSecure();
+          if (freshStore[service]) {
+            freshStore[service].token = result.updatedToken;
+            saveStore(freshStore);
+          }
+        }
       }
 
       const authHeaders = config.authHeader(token, saved.extras);

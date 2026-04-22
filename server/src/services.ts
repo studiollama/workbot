@@ -20,6 +20,47 @@ import { winrmService } from "./connections/winrm.js";
 export { PROJECT_ROOT, STORE_DIR, STORE_PATH };
 export type { StoredService };
 
+const QBO_AIRTABLE_BASE = "appHHMEcznh7jG3aC";
+const QBO_AIRTABLE_TABLE = "tblcWybeCnP8UX819";
+const QBO_AIRTABLE_RECORD = "recH9CoDcIGAwnJHk";
+
+function getAirtableToken(): string | null {
+  const store = loadStore();
+  const airtable = Object.entries(store).find(([k]) => k === "airtable" || k.startsWith("airtable:"));
+  return airtable?.[1]?.token ?? null;
+}
+
+async function readQboRefreshFromAirtable(): Promise<string | null> {
+  const atToken = getAirtableToken();
+  if (!atToken) return null;
+
+  const res = await fetch(
+    `https://api.airtable.com/v0/${QBO_AIRTABLE_BASE}/${QBO_AIRTABLE_TABLE}/${QBO_AIRTABLE_RECORD}`,
+    { headers: { Authorization: `Bearer ${atToken}` } }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.fields?.Key ?? null;
+}
+
+async function syncQboRefreshToAirtable(newRefreshToken: string): Promise<void> {
+  const atToken = getAirtableToken();
+  if (!atToken) return;
+
+  await fetch(
+    `https://api.airtable.com/v0/${QBO_AIRTABLE_BASE}/${QBO_AIRTABLE_TABLE}/${QBO_AIRTABLE_RECORD}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${atToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ fields: { Key: newRefreshToken } }),
+    }
+  );
+  console.log("[QBO] Refresh token synced to Airtable");
+}
+
 export function loadStore(): Record<string, StoredService> {
   try {
     if (!existsSync(STORE_PATH)) return {};
@@ -163,7 +204,7 @@ export interface RestServiceConfig extends ServiceConfigBase {
   preConnect?: (
     token: string,
     extras: Record<string, string>
-  ) => Promise<{ resolvedToken: string }>;
+  ) => Promise<{ resolvedToken: string; updatedToken?: string }>;
   oauth?: OAuthConfig;
 }
 
@@ -734,9 +775,53 @@ export const SERVICES: Record<string, ServiceConfig> = {
     extractUser: (data) => data.CompanyInfo?.CompanyName ?? "Connected",
     tokenUrl: "https://developer.intuit.com/app/developer/playground",
     tokenPrefix: "",
-    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
+    authNote: "Paste refresh token. Access tokens are auto-refreshed via OAuth.",
     difficulty: "OAuth Token",
-    extraFields: [{ key: "realmId", label: "Company ID (Realm ID)", placeholder: "123456789" }],
+    extraFields: [
+      { key: "realmId", label: "Company ID (Realm ID)", placeholder: "123456789" },
+      { key: "client_id", label: "Client ID", placeholder: "ABc...from Intuit Developer" },
+      { key: "client_secret", label: "Client Secret", placeholder: "ABc...from Intuit Developer" },
+    ],
+    preConnect: async (_storedToken, extras) => {
+      // Airtable is the single source of truth for the refresh token
+      const atRefresh = await readQboRefreshFromAirtable();
+      const refreshToken = atRefresh ?? _storedToken;
+
+      const basicAuth = Buffer.from(`${extras.client_id}:${extras.client_secret}`).toString("base64");
+      const res = await fetch("https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+          Authorization: `Basic ${basicAuth}`,
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+        }).toString(),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`QuickBooks token refresh failed (${res.status}): ${text.slice(0, 200)}`);
+      }
+      const data = await res.json();
+      const newRefreshToken: string | undefined = data.refresh_token;
+
+      // Write rotated refresh token back to Airtable and local store
+      if (newRefreshToken) {
+        if (newRefreshToken !== refreshToken) {
+          syncQboRefreshToAirtable(newRefreshToken).catch((err) =>
+            console.warn("[QBO] Airtable refresh token sync failed:", err.message)
+          );
+        }
+        // Always update local store to stay in sync with Airtable
+        if (newRefreshToken !== _storedToken) {
+          return { resolvedToken: data.access_token, updatedToken: newRefreshToken };
+        }
+      }
+
+      return { resolvedToken: data.access_token };
+    },
   },
   canva: {
     kind: "rest",

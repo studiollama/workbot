@@ -20,8 +20,8 @@ function getNextCronRun(cronExpr: string): string | null {
   if (parts.length !== 5) return null;
 
   const now = new Date();
-  // Brute-force: check each minute for the next 48 hours
-  for (let i = 1; i <= 48 * 60; i++) {
+  // Brute-force: check each minute for the next 32 days
+  for (let i = 1; i <= 32 * 24 * 60; i++) {
     const candidate = new Date(now.getTime() + i * 60_000);
     candidate.setSeconds(0, 0);
     if (cronMatches(parts, candidate)) {

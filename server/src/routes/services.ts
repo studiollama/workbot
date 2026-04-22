@@ -171,10 +171,12 @@ router.post("/:service/connect", async (req, res) => {
     // If service has a preConnect hook (e.g., Azure AD token exchange),
     // resolve the actual bearer token from the user's credentials
     let validationToken = token;
+    let persistToken = token;
     if (config.preConnect) {
       try {
         const result = await config.preConnect(token, extras);
         validationToken = result.resolvedToken;
+        if (result.updatedToken) persistToken = result.updatedToken;
       } catch (err: any) {
         console.error(`[services] preConnect failed for ${service}:`, err.message);
         return res.status(422).json({ error: err.message ?? "Authentication failed" });
@@ -212,7 +214,7 @@ router.post("/:service/connect", async (req, res) => {
       }
     }
     store[storeKey] = {
-      token,
+      token: persistToken,
       user,
       ...(Object.keys(savedExtras).length > 0 ? { extras: savedExtras } : {}),
       _instanceName: resolvedName,
