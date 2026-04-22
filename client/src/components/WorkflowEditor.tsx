@@ -86,7 +86,7 @@ export default function WorkflowEditor({ workflowId, scope, onSave, onCancel }: 
     const defaults: Record<string, any> = {
       mcp_tool: { tool: "brain_search", args: {} },
       shell: { command: "", timeout: 30000 },
-      claude_prompt: { prompt: "", useProjectContext: true },
+      claude_prompt: { prompt: "", useProjectContext: true, timeout: 1800 },
       python: { script: "", timeout: 60000 },
       brain_write: { action: "archive_result", title: "", useNodeOutput: "" },
     };
@@ -370,6 +370,13 @@ function NodeConfigEditor({ node, allNodes, onChange }: { node: TaskNode; allNod
               className="rounded" />
             Bypass permissions (no confirmation prompts)
           </label>
+          <div>
+            <label className="block text-xs text-theme-secondary mb-1">Timeout (seconds, default 1800 = 30 min)</label>
+            <input type="number" min={1}
+              value={node.config.timeout ?? 1800}
+              onChange={(e) => onChange({ config: { ...node.config, timeout: parseInt(e.target.value) || 1800 } })}
+              className="w-full px-2 py-1.5 bg-surface-input border border-theme-input rounded text-xs text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500" />
+          </div>
         </>
       )}
     </div>

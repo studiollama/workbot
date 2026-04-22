@@ -172,8 +172,13 @@ router.post("/:service/connect", async (req, res) => {
     // resolve the actual bearer token from the user's credentials
     let validationToken = token;
     if (config.preConnect) {
-      const result = await config.preConnect(token, extras);
-      validationToken = result.resolvedToken;
+      try {
+        const result = await config.preConnect(token, extras);
+        validationToken = result.resolvedToken;
+      } catch (err: any) {
+        console.error(`[services] preConnect failed for ${service}:`, err.message);
+        return res.status(422).json({ error: err.message ?? "Authentication failed" });
+      }
     }
 
     const validateUrl =
@@ -187,7 +192,7 @@ router.post("/:service/connect", async (req, res) => {
 
     if (!response.ok) {
       const text = await response.text();
-      return res.status(401).json({
+      return res.status(422).json({
         error:
           response.status === 401 || response.status === 403
             ? "Invalid token"
@@ -196,7 +201,7 @@ router.post("/:service/connect", async (req, res) => {
     }
 
     const data = await response.json();
-    const user = config.extractUser(data);
+    const user = config.extractUser(data, extras);
 
     // Persist to disk (include extras so we can rebuild auth headers later)
     const store = loadStore();

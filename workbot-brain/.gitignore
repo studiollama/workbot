@@ -6,20 +6,8 @@
 # This keeps the brain reusable across clones.
 # ============================================
 
-# --- CONTENT DIRECTORIES (business-specific, never committed) ---
-# Ignore all content but keep directory structure via .gitkeep
-context/*
-!context/.gitkeep
-knowledge/**
-!knowledge/
-!knowledge/*/
-!knowledge/**/.gitkeep
-inbox/*
-!inbox/.gitkeep
-archive/**
-!archive/
-!archive/*/
-!archive/**/.gitkeep
+# --- CONTENT DIRECTORIES ---
+# Tracked locally for history. Not pushed to remote.
 
 # --- OBSIDIAN WORKSPACE STATE (device-specific) ---
 .obsidian/workspace.json

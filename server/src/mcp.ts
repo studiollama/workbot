@@ -1090,9 +1090,19 @@ loggedTool(
     }
 
     try {
+      if (config.urlGuard && saved.extras) {
+        const guardError = config.urlGuard(url, saved.extras);
+        if (guardError) {
+          return {
+            content: [{ type: "text", text: guardError }],
+            isError: true,
+          };
+        }
+      }
+
       let token = saved.token;
-      if (config.preConnect && saved.extras) {
-        const result = await config.preConnect(saved.token, saved.extras);
+      if (config.preConnect) {
+        const result = await config.preConnect(saved.token, saved.extras ?? {});
         token = result.resolvedToken;
       }
 

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { createSign } from "crypto";
 import {
   readActiveKey,
   encryptStore,
@@ -152,7 +153,8 @@ export interface RestServiceConfig extends ServiceConfigBase {
     token: string,
     extras?: Record<string, string>
   ) => Record<string, string>;
-  extractUser: (data: any) => string;
+  extractUser: (data: any, extras?: Record<string, string>) => string;
+  urlGuard?: (url: string, extras?: Record<string, string>) => string | null;
   tokenUrl: string;
   tokenPrefix: string;
   extraFields?: { key: string; label: string; placeholder: string }[];
@@ -212,6 +214,45 @@ export async function getAzureADToken(
     throw new Error(
       `Azure AD token exchange failed (${res.status}): ${text.slice(0, 200)}`
     );
+  }
+  const data = await res.json();
+  return data.access_token;
+}
+
+// Google service account JWT → bearer token exchange
+export async function getGoogleServiceAccountToken(
+  serviceAccountJson: string,
+  scopes: string,
+  impersonateEmail?: string
+): Promise<string> {
+  const sa = JSON.parse(serviceAccountJson);
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
+  const payload: Record<string, any> = {
+    iss: sa.client_email,
+    scope: scopes,
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  };
+  if (impersonateEmail) payload.sub = impersonateEmail;
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sign = createSign("RSA-SHA256");
+  sign.update(`${header}.${payloadB64}`);
+  const signature = sign.sign(sa.private_key, "base64url");
+  const jwt = `${header}.${payloadB64}.${signature}`;
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }).toString(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google token exchange failed (${res.status}): ${text.slice(0, 200)}`);
   }
   const data = await res.json();
   return data.access_token;
@@ -528,17 +569,25 @@ export const SERVICES: Record<string, ServiceConfig> = {
   outlook: {
     kind: "rest",
     name: "Outlook (Microsoft 365)",
-    validateUrl:
-      "https://graph.microsoft.com/v1.0/users?$top=1&$select=displayName,mail",
+    validateUrl: (extras) =>
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(extras.mailbox)}/mailFolders/inbox?$select=displayName,totalItemCount`,
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
-    extractUser: (data) => {
-      const user = data.value?.[0];
-      return user?.displayName ?? user?.mail ?? "Connected";
-    },
+    extractUser: (data, extras) => extras?.mailbox ?? data?.displayName ?? "Connected",
     tokenUrl: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
     tokenPrefix: "",
     tokenLabel: "Client Secret",
     difficulty: "Enterprise App",
+    urlGuard: (url, extras) => {
+      const mailbox = extras?.mailbox;
+      if (!mailbox) return "No mailbox configured for this instance";
+      const lower = url.toLowerCase();
+      const mailboxLower = mailbox.toLowerCase();
+      const allowed =
+        lower.includes(`/users/${mailboxLower}`) ||
+        lower.includes(`/users/${encodeURIComponent(mailboxLower)}`);
+      if (!allowed) return `This instance is restricted to mailbox: ${mailbox}. URL must target /users/${mailbox}/...`;
+      return null;
+    },
     extraFields: [
       {
         key: "tenant_id",
@@ -549,6 +598,11 @@ export const SERVICES: Record<string, ServiceConfig> = {
         key: "client_id",
         label: "Client ID (App ID)",
         placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      },
+      {
+        key: "mailbox",
+        label: "Mailbox (email address)",
+        placeholder: "user@domain.com",
       },
     ],
     preConnect: async (clientSecret, extras) => {
@@ -744,14 +798,38 @@ export const SERVICES: Record<string, ServiceConfig> = {
     name: "Google Admin Console",
     validateUrl: "https://admin.googleapis.com/admin/directory/v1/users?maxResults=1&customer=my_customer",
     authHeader: (token) => ({ Authorization: `Bearer ${token}` }),
-    extractUser: (data) => {
+    extractUser: (data, extras) => {
+      const email = extras?.admin_email;
+      if (email) return email;
       const users = data.users ?? [];
       return users.length > 0 ? `${users[0].name?.fullName ?? users[0].primaryEmail ?? "Admin"}` : "Connected";
     },
-    tokenUrl: "https://developers.google.com/oauthplayground/",
+    tokenUrl: "https://console.cloud.google.com/iam-admin/serviceaccounts",
     tokenPrefix: "",
-    authNote: "OAuth token — expires after ~1 hour. Re-connect when expired.",
-    difficulty: "Admin + OAuth",
+    tokenLabel: "Service Account JSON",
+    authNote: "Paste the full contents of the service account JSON key file. Requires domain-wide delegation.",
+    difficulty: "Service Account",
+    extraFields: [
+      {
+        key: "admin_email",
+        label: "Admin Email (to impersonate)",
+        placeholder: "admin@yourdomain.org",
+      },
+    ],
+    preConnect: async (serviceAccountJson, extras) => {
+      const scopes = [
+        "https://www.googleapis.com/auth/admin.directory.user.readonly",
+        "https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly",
+        "https://www.googleapis.com/auth/admin.directory.group.readonly",
+        "https://www.googleapis.com/auth/admin.directory.orgunit.readonly",
+      ].join(" ");
+      const resolvedToken = await getGoogleServiceAccountToken(
+        serviceAccountJson,
+        scopes,
+        extras.admin_email
+      );
+      return { resolvedToken };
+    },
   },
   ticktick: {
     kind: "rest",
