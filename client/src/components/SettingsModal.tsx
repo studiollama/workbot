@@ -8,10 +8,29 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
+const BROWSER_TZ =
+  typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" : "UTC";
+
+function listTimezones(): string[] {
+  const anyIntl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
+  if (typeof anyIntl.supportedValuesOf === "function") {
+    try { return anyIntl.supportedValuesOf("timeZone"); } catch { /* fallthrough */ }
+  }
+  // Minimal fallback if the runtime doesn't support supportedValuesOf
+  return [
+    "UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+    "America/Toronto", "America/Mexico_City", "America/Sao_Paulo",
+    "Europe/London", "Europe/Berlin", "Europe/Paris", "Europe/Madrid", "Europe/Athens",
+    "Africa/Johannesburg", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo",
+    "Australia/Sydney", "Pacific/Auckland",
+  ];
+}
+
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
-  const { workbotName, accentColor, themeMode, updateSettings, setThemeMode } = useServices();
+  const { workbotName, accentColor, themeMode, timezone, updateSettings, setThemeMode } = useServices();
   const [name, setName] = useState(workbotName);
   const [color, setColor] = useState(accentColor);
+  const [tz, setTz] = useState(timezone);
   const [agentsPath, setAgentsPath] = useState("AGENTS.md");
   const [claudeMdPath, setClaudeMdPath] = useState("CLAUDE.md");
   const [serverPort, setServerPort] = useState(3001);
@@ -29,6 +48,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     if (open) {
       setName(workbotName);
       setColor(accentColor);
+      setTz(timezone);
       api.getMcpConfig().then((info) => {
         setAgentsPath(info.config.agentsFilePath || "AGENTS.md");
         setClaudeMdPath(info.config.claudeMdPath || "CLAUDE.md");
@@ -38,7 +58,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         setHostClientPort(info.config.hostClientPort || null);
       }).catch(() => {});
     }
-  }, [open, workbotName, accentColor]);
+  }, [open, workbotName, accentColor, timezone]);
+
+  function handleTimezoneChange(value: string) {
+    setTz(value);
+    updateSettings(name || "Workbot", color, themeMode, value);
+  }
 
   function handleNameChange(value: string) {
     setName(value);
@@ -179,6 +204,25 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Timezone */}
+          <div className="space-y-2">
+            <label className="text-xs text-theme-secondary uppercase tracking-wider">
+              Timezone
+            </label>
+            <select
+              value={tz}
+              onChange={(e) => handleTimezoneChange(e.target.value)}
+              className="w-full bg-surface-input border border-theme-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+            >
+              {listTimezones().map((z) => (
+                <option key={z} value={z}>{z}</option>
+              ))}
+            </select>
+            <p className="text-xs text-theme-secondary">
+              Used to display dates and to evaluate workflow cron schedules (DST handled automatically). Browser default: <span className="font-mono">{BROWSER_TZ}</span>.
+            </p>
           </div>
 
           {/* Color picker */}

@@ -63,6 +63,7 @@ export interface DashboardConfig {
   enabledServices: string[];
   workbotName?: string;
   accentColor?: string;
+  timezone?: string;
 }
 
 export interface DeviceCodeResponse {

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../api/client";
 import { randomUUID } from "../utils/uuid";
 import WorkflowDagView from "./WorkflowDagView";
+import { useServices } from "../context/ServicesContext";
 
 interface TaskNode {
   id: string;
@@ -21,7 +22,7 @@ interface WorkflowData {
   id?: string;
   name: string;
   description: string;
-  schedule?: { cron?: string };
+  schedule?: { cron?: string; timezone?: string };
   triggers?: { type: "webhook" | "file_change"; webhookId?: string; watchPath?: string; debounceMs?: number }[];
   nodes: TaskNode[];
   edges: TaskEdge[];
@@ -42,7 +43,16 @@ const MCP_TOOLS = [
   "agents_read", "agents_write",
 ];
 
+function listTimezones(): string[] {
+  const anyIntl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
+  if (typeof anyIntl.supportedValuesOf === "function") {
+    try { return anyIntl.supportedValuesOf("timeZone"); } catch { /* fallthrough */ }
+  }
+  return ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Tokyo"];
+}
+
 export default function WorkflowEditor({ workflowId, scope, onSave, onCancel }: Props) {
+  const { timezone: dashboardTz } = useServices();
   const [data, setData] = useState<WorkflowData>({
     name: "",
     description: "",
@@ -151,11 +161,28 @@ export default function WorkflowEditor({ workflowId, scope, onSave, onCancel }: 
           </div>
           <div>
             <label className="block text-xs text-theme-secondary mb-1">Cron Schedule</label>
-            <input value={data.schedule?.cron ?? ""} onChange={(e) => setData((d) => ({ ...d, schedule: { cron: e.target.value || undefined } }))}
+            <input value={data.schedule?.cron ?? ""} onChange={(e) => setData((d) => ({ ...d, schedule: { ...(d.schedule ?? {}), cron: e.target.value || undefined } }))}
               placeholder="0 9 * * 1-5"
               className="w-full px-3 py-2 bg-surface-input border border-theme-input rounded-lg text-sm text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono" />
           </div>
         </div>
+        {data.schedule?.cron && (
+          <div>
+            <label className="block text-xs text-theme-secondary mb-1">
+              Schedule Timezone <span className="text-theme-secondary/70">(DST-aware — defaults to dashboard: {dashboardTz})</span>
+            </label>
+            <select
+              value={data.schedule?.timezone ?? ""}
+              onChange={(e) => setData((d) => ({ ...d, schedule: { ...(d.schedule ?? {}), timezone: e.target.value || undefined } }))}
+              className="w-full px-3 py-2 bg-surface-input border border-theme-input rounded-lg text-sm text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent-500"
+            >
+              <option value="">Use dashboard timezone ({dashboardTz})</option>
+              {listTimezones().map((z) => (
+                <option key={z} value={z}>{z}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="block text-xs text-theme-secondary mb-1">Description</label>
           <input value={data.description} onChange={(e) => setData((d) => ({ ...d, description: e.target.value }))}

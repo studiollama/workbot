@@ -30,9 +30,10 @@ interface DashboardConfig {
   enabledServices: string[];
   workbotName?: string;
   accentColor?: string;
+  timezone?: string;
 }
 
-function loadDashboardConfig(): DashboardConfig | null {
+export function loadDashboardConfig(): DashboardConfig | null {
   try {
     if (!existsSync(DASHBOARD_PATH)) return null;
     return JSON.parse(readFileSync(DASHBOARD_PATH, "utf-8"));
@@ -547,13 +548,14 @@ router.get("/dashboard", (_req, res) => {
 
 // PUT /api/services/dashboard — saves enabled services list + settings
 router.put("/dashboard", (req, res) => {
-  const { enabledServices, workbotName, accentColor } = req.body;
+  const { enabledServices, workbotName, accentColor, timezone } = req.body;
   if (!Array.isArray(enabledServices)) {
     return res.status(400).json({ error: "enabledServices must be an array" });
   }
   const config: DashboardConfig = { enabledServices };
   if (typeof workbotName === "string") config.workbotName = workbotName;
   if (typeof accentColor === "string") config.accentColor = accentColor;
+  if (typeof timezone === "string" && timezone) config.timezone = timezone;
   saveDashboardConfig(config);
   res.json({ ok: true });
 });

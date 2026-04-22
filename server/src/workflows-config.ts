@@ -87,7 +87,7 @@ export interface WorkflowDefinition {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
-  schedule?: { cron?: string };
+  schedule?: { cron?: string; timezone?: string };
   triggers?: WorkflowTrigger[];
   nodes: TaskNode[];
   edges: TaskEdge[];

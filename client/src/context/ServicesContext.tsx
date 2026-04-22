@@ -19,12 +19,16 @@ interface ServicesState {
   workbotName: string;
   accentColor: string;
   themeMode: ThemeMode;
+  timezone: string;
   loading: boolean;
   refresh: () => Promise<void>;
   setEnabledServices: (keys: string[]) => Promise<void>;
-  updateSettings: (name: string, color: string, mode?: ThemeMode) => Promise<void>;
+  updateSettings: (name: string, color: string, mode?: ThemeMode, timezone?: string) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => void;
 }
+
+const BROWSER_TZ =
+  typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" : "UTC";
 
 const ServicesContext = createContext<ServicesState>({
   services: {},
@@ -34,6 +38,7 @@ const ServicesContext = createContext<ServicesState>({
   workbotName: "Workbot",
   accentColor: DEFAULT_ACCENT_ID,
   themeMode: "dark",
+  timezone: BROWSER_TZ,
   loading: true,
   refresh: async () => {},
   setEnabledServices: async () => {},
@@ -48,10 +53,11 @@ export function ServicesProvider({ children }: { children: ReactNode }) {
   const [workbotName, setWorkbotName] = useState("Workbot");
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT_ID);
   const [themeMode, setThemeModeState] = useState<ThemeMode>(getSavedThemeMode());
+  const [timezone, setTimezone] = useState<string>(BROWSER_TZ);
   const [loading, setLoading] = useState(true);
 
-  const settingsRef = useRef({ workbotName, accentColor, themeMode });
-  settingsRef.current = { workbotName, accentColor, themeMode };
+  const settingsRef = useRef({ workbotName, accentColor, themeMode, timezone });
+  settingsRef.current = { workbotName, accentColor, themeMode, timezone };
 
   const enabledRef = useRef(enabledServices);
   enabledRef.current = enabledServices;
@@ -87,9 +93,11 @@ export function ServicesProvider({ children }: { children: ReactNode }) {
       const name = dashboard.workbotName || "Workbot";
       const color = dashboard.accentColor || DEFAULT_ACCENT_ID;
       const mode = getSavedThemeMode();
+      const tz = dashboard.timezone || BROWSER_TZ;
       setWorkbotName(name);
       setAccentColor(color);
       setThemeModeState(mode);
+      setTimezone(tz);
       applyAccentColor(color, mode);
     } catch {
       // keep existing state on error
@@ -101,8 +109,8 @@ export function ServicesProvider({ children }: { children: ReactNode }) {
   const setEnabledServices = useCallback(async (keys: string[]) => {
     setEnabledServicesState(keys);
     try {
-      const { workbotName: n, accentColor: c } = settingsRef.current;
-      await api.saveDashboardConfig({ enabledServices: keys, workbotName: n, accentColor: c });
+      const { workbotName: n, accentColor: c, timezone: tz } = settingsRef.current;
+      await api.saveDashboardConfig({ enabledServices: keys, workbotName: n, accentColor: c, timezone: tz });
     } catch {
       const dashboard = await api.getDashboardConfig();
       setEnabledServicesState(dashboard.enabledServices);
@@ -114,14 +122,16 @@ export function ServicesProvider({ children }: { children: ReactNode }) {
     applyAccentColor(settingsRef.current.accentColor, mode);
   }, []);
 
-  const updateSettings = useCallback(async (name: string, color: string, mode?: ThemeMode) => {
+  const updateSettings = useCallback(async (name: string, color: string, mode?: ThemeMode, tz?: string) => {
     setWorkbotName(name);
     setAccentColor(color);
     const m = mode ?? settingsRef.current.themeMode;
     if (mode) setThemeModeState(m);
+    const nextTz = tz ?? settingsRef.current.timezone;
+    if (tz) setTimezone(tz);
     applyAccentColor(color, m);
     try {
-      await api.saveDashboardConfig({ enabledServices: enabledRef.current, workbotName: name, accentColor: color });
+      await api.saveDashboardConfig({ enabledServices: enabledRef.current, workbotName: name, accentColor: color, timezone: nextTz });
     } catch {}
   }, []);
 
@@ -131,7 +141,7 @@ export function ServicesProvider({ children }: { children: ReactNode }) {
     <ServicesContext.Provider
       value={{
         services, config, enabledServices, allServiceKeys,
-        workbotName, accentColor, themeMode, loading,
+        workbotName, accentColor, themeMode, timezone, loading,
         refresh, setEnabledServices, updateSettings, setThemeMode,
       }}
     >

@@ -20,6 +20,7 @@ import {
 } from "./workflows-config.js";
 import { loadStore, SERVICES, parseInstanceId } from "./services.js";
 import { loadMcpConfig } from "./mcp-config.js";
+import { loadDashboardConfig } from "./routes/services.js";
 import { getAllNotes, buildLinkGraph, loadNote, BRAIN_ROOT } from "./brain-utils.js";
 import { getCommonBrain, validateCommonPath, commonGitCommit } from "./common-brain-utils.js";
 import { execFile } from "child_process";
@@ -68,11 +69,16 @@ export class WorkflowEngine {
   // ── Setup ────────────────────────────────────────────────────────────
 
   private setupWorkflow(wf: WorkflowDefinition): void {
-    // Cron schedule
+    // Cron schedule — respects per-workflow timezone, falling back to the
+    // dashboard timezone so DST transitions are honoured automatically.
     if (wf.schedule?.cron && cron.validate(wf.schedule.cron)) {
-      const job = cron.schedule(wf.schedule.cron, () => {
-        this.executeWorkflow(wf.id, "cron");
-      });
+      const dashboardTz = loadDashboardConfig()?.timezone;
+      const timezone = wf.schedule.timezone || dashboardTz;
+      const job = cron.schedule(
+        wf.schedule.cron,
+        () => { this.executeWorkflow(wf.id, "cron"); },
+        timezone ? { timezone } : undefined,
+      );
       this.cronJobs.set(wf.id, job);
     }
 
