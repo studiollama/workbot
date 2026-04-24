@@ -1266,7 +1266,12 @@ loggedTool(
 
 // ── Workflow tools ────────────────────────────────────────────────────
 
-const workflowEngine = new WorkflowEngine();
+// NOTE: schedule:false is critical. The MCP server runs in a separate process
+// from the Express backend but reads the same workflows.json. If both engines
+// registered crons, every scheduled run would fire twice ~milliseconds apart
+// (seen in the wild as duplicate Email Review tasks on 2026-04-23 and
+// 2026-04-24). Express owns the cron schedule; MCP only executes on demand.
+const workflowEngine = new WorkflowEngine({ schedule: false });
 workflowEngine.start();
 
 loggedTool(

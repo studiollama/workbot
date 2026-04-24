@@ -5,6 +5,7 @@ import { watch, type FSWatcher } from "fs";
 import {
   loadWorkflows,
   getWorkflow,
+  getScopedPaths,
   appendRun,
   updateRun,
   loadRuns,
@@ -30,18 +31,60 @@ const execFileAsync = promisify(execFile);
 
 // ── Workflow Engine ────────────────────────────────────────────────────
 
+export interface WorkflowEngineOptions {
+  /**
+   * Whether this engine should register cron schedules, file watchers, and the
+   * workflows.json auto-reload watcher. Defaults to true.
+   *
+   * Set to false for engines that only execute workflows on demand (e.g. the
+   * MCP server, which shares workflows.json with the Express backend and must
+   * NOT double-schedule the same crons — doing so causes duplicate cron fires
+   * milliseconds apart and produces duplicate task artifacts).
+   */
+  schedule?: boolean;
+}
+
 export class WorkflowEngine {
   private cronJobs = new Map<string, Cron>();
   private fileWatchers = new Map<string, FSWatcher>();
   private activeRuns = new Map<string, WorkflowRun>();
   private debounceTimers = new Map<string, NodeJS.Timeout>();
+  private readonly schedule: boolean;
+
+  constructor(opts: WorkflowEngineOptions = {}) {
+    this.schedule = opts.schedule ?? true;
+  }
 
   start(): void {
+    if (!this.schedule) return;
+    this.watchWorkflowsFile();
     const workflows = loadWorkflows();
     for (const wf of workflows) {
       if (wf.enabled) this.setupWorkflow(wf);
     }
     console.log(`Workflow engine started (${workflows.filter((w) => w.enabled).length} active)`);
+  }
+
+  private watchWorkflowsFile(): void {
+    const { workflowsPath } = getScopedPaths();
+    try {
+      const watcher = watch(workflowsPath, () => {
+        const key = "__workflows_json__";
+        const existing = this.debounceTimers.get(key);
+        if (existing) clearTimeout(existing);
+        this.debounceTimers.set(
+          key,
+          setTimeout(() => {
+            this.debounceTimers.delete(key);
+            console.log("[workflow-engine] workflows.json changed — reloading");
+            this.reload();
+          }, 500)
+        );
+      });
+      this.fileWatchers.set("__workflows_json__", watcher);
+    } catch (err) {
+      console.warn("[workflow-engine] Failed to watch workflows.json:", (err as Error).message);
+    }
   }
 
   stop(): void {

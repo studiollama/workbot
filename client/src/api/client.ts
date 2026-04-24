@@ -13,10 +13,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Session expired");
   }
 
-  const data = await res.json();
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch {
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+    throw new Error("Invalid JSON response");
+  }
   if (!res.ok) {
-    const err: any = new Error(data.error ?? "Request failed");
-    if (data.needsOldPassword) err.needsOldPassword = true;
+    const err: any = new Error(data?.error ?? `HTTP ${res.status}`);
+    if (data?.needsOldPassword) err.needsOldPassword = true;
     throw err;
   }
   return data as T;

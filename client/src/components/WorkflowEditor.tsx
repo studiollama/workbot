@@ -67,7 +67,7 @@ export default function WorkflowEditor({ workflowId, scope, onSave, onCancel }: 
 
   useEffect(() => {
     if (!workflowId) return;
-    api.getWorkflow(workflowId, scope).then((wf) => {
+    api.getWorkflow(workflowId, scope).then(({ runs: _runs, ...wf }) => {
       setData(wf);
       setLoading(false);
     }).catch(() => setLoading(false));
